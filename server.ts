@@ -1506,12 +1506,9 @@ interface RenderJobSceneStatus {
   label: string;
 }
 
-type RenderQualityMode = "budget" | "turbo" | "master";
-
 interface RenderJob {
   projectId: string;
   status: "running" | "completed" | "failed";
-  qualityMode?: RenderQualityMode;
   totalScenes: number;
   completedScenes: number;
   currentSceneIndex: number | null;
@@ -1525,12 +1522,11 @@ const renderJobs = new Map<string, RenderJob>();
 
 async function runRenderPipeline(
   projectId: string,
-  falKey: string,
-  job: RenderJob,
-  qualityMode: RenderQualityMode = "turbo"
+  falKey: string | null,
+  job: RenderJob
 ): Promise<void> {
   try {
-    fal.config({ credentials: falKey });
+    if (falKey) fal.config({ credentials: falKey });
 
     const project = await prisma.project.findUnique({
       where: { id: projectId },
@@ -1610,6 +1606,9 @@ async function runRenderPipeline(
 
       try {
         if (s.shotType === "lipsync") {
+          if (!falKey) {
+            throw new Error("FAL_KEY is required for sync-lipsync shots. Add it to the app's environment.");
+          }
           if (!lipsyncAudioSourceAbs) {
             throw new Error(
               `Shot ${shotNum} is marked 'lipsync', but vocals.wav / song.mp3 was not found.`
@@ -1694,63 +1693,51 @@ async function runRenderPipeline(
               ? "1:1"
               : "16:9";
 
-          const modeLabel =
-            qualityMode === "budget"
-              ? "Animating via Wan 2.2 (Budget)..."
-              : qualityMode === "master"
-              ? "Animating via Kling v2 Master..."
-              : "Animating via Kling 2.5 Turbo...";
-
           job.scenes[s.id] = {
             orderIndex: s.orderIndex,
             shotType: s.shotType,
             state: "rendering",
-            label: modeLabel,
+            label: "Animating with LTX-2.5 on Modal...",
           };
 
           const imgExt = path.extname(srcImgAbs).toLowerCase();
           const imgMime = imgExt === ".png" ? "image/png" : imgExt === ".webp" ? "image/webp" : "image/jpeg";
-          const imageUrl = await uploadLocalFileToFal(srcImgAbs, imgMime);
-
-          let outVideoUrl: string | undefined;
-
-          if (qualityMode === "budget") {
-            const wanRes = await fal.subscribe("fal-ai/wan/v2.2-a14b/image-to-video", {
-              input: {
-                prompt: motionPrompt,
-                image_url: imageUrl,
-                resolution: "720p",
-                aspect_ratio: ratioArg,
-                frames_per_second: 24,
-              },
-            });
-            outVideoUrl = (wanRes.data as { video?: { url?: string } })?.video?.url;
-          } else if (qualityMode === "master") {
-            const klingRes = await fal.subscribe("fal-ai/kling-video/v2/master/image-to-video", {
-              input: {
-                prompt: motionPrompt,
-                image_url: imageUrl,
-                duration: "5",
-                aspect_ratio: ratioArg,
-              },
-            });
-            outVideoUrl = (klingRes.data as { video?: { url?: string } })?.video?.url;
-          } else {
-            // Default "turbo" -> fal-ai/kling-video/v2.5-turbo/pro/image-to-video (4x cheaper & faster)
-            const turboRes = await fal.subscribe("fal-ai/kling-video/v2.5-turbo/pro/image-to-video", {
-              input: {
-                prompt: motionPrompt,
-                image_url: imageUrl,
-                duration: "5",
-              },
-            });
-            outVideoUrl = (turboRes.data as { video?: { url?: string } })?.video?.url;
+          const ltxUrl = process.env.MODAL_LTX_URL?.trim();
+          if (!ltxUrl) {
+            throw new Error("MODAL_LTX_URL is not configured. Add the deployed Modal LTX /generate URL.");
           }
 
-          if (!outVideoUrl) {
-            throw new Error(`Video generation (${qualityMode}) returned no video URL for Shot ${shotNum}.`);
+          const form = new FormData();
+          const imageBuffer = fs.readFileSync(srcImgAbs);
+          form.append("image", new Blob([new Uint8Array(imageBuffer)], { type: imgMime }), path.basename(srcImgAbs));
+          form.append("prompt", motionPrompt);
+          form.append("aspect_ratio", ratioArg);
+
+          const ltxHeaders: Record<string, string> = {};
+          const ltxToken = process.env.MODAL_LTX_TOKEN?.trim();
+          if (ltxToken) ltxHeaders.Authorization = `Bearer ${ltxToken}`;
+
+          const ltxResponse = await fetch(ltxUrl, {
+            method: "POST",
+            headers: ltxHeaders,
+            body: form,
+            signal: AbortSignal.timeout(25 * 60 * 1000),
+          });
+          if (!ltxResponse.ok) {
+            const detail = (await ltxResponse.text()).slice(0, 1200);
+            throw new Error(`LTX-2.5 generation failed (${ltxResponse.status}): ${detail}`);
           }
-          await downloadRemoteFile(outVideoUrl, rawClipAbs);
+
+          const contentType = ltxResponse.headers.get("content-type") || "";
+          if (!contentType.includes("video/mp4")) {
+            const detail = (await ltxResponse.text()).slice(0, 1200);
+            throw new Error(`LTX service returned an unexpected response: ${detail || contentType}`);
+          }
+          const videoBuffer = Buffer.from(await ltxResponse.arrayBuffer());
+          if (videoBuffer.length < 1024) {
+            throw new Error("LTX-2.5 returned an empty or incomplete video file.");
+          }
+          fs.writeFileSync(rawClipAbs, videoBuffer);
         }
 
         // Trim/scale downloaded clip to exact (endSec - startSec) at 24fps (1920x1080 or 1080x1920)
@@ -1922,12 +1909,6 @@ app.post("/api/projects/:id/render", async (req: Request, res: Response) => {
     }
 
     const falKey = getFalKey();
-    if (!falKey) {
-      res.status(400).json({
-        error: "FAL_KEY is not configured. Add FAL_KEY in Secrets to run sync-lipsync and Kling v2 Master.",
-      });
-      return;
-    }
 
     const project = await prisma.project.findUnique({
       where: { id },
@@ -1949,6 +1930,21 @@ app.post("/api/projects/:id/render", async (req: Request, res: Response) => {
       return;
     }
 
+    const hasLipSyncShots = readyScenes.some((s) => s.shotType === "lipsync");
+    const hasBRollShots = readyScenes.some((s) => s.shotType !== "lipsync");
+    if (hasLipSyncShots && !falKey) {
+      res.status(400).json({
+        error: "FAL_KEY is required because this project contains lip-sync shots. Add FAL_KEY to the app's environment.",
+      });
+      return;
+    }
+    if (hasBRollShots && !process.env.MODAL_LTX_URL?.trim()) {
+      res.status(400).json({
+        error: "MODAL_LTX_URL is not configured. Deploy the LTX-2.5 Modal service and add its /generate URL to the app's environment.",
+      });
+      return;
+    }
+
     const sceneMap: Record<string, RenderJobSceneStatus> = {};
     for (const s of readyScenes) {
       sceneMap[s.id] = {
@@ -1959,20 +1955,13 @@ app.post("/api/projects/:id/render", async (req: Request, res: Response) => {
       };
     }
 
-    const requestedMode = req.body?.qualityMode;
-    const qualityMode: RenderQualityMode =
-      requestedMode === "budget" || requestedMode === "master" || requestedMode === "turbo"
-        ? requestedMode
-        : "turbo";
-
     const job: RenderJob = {
       projectId: id,
       status: "running",
-      qualityMode,
       totalScenes: readyScenes.length,
       completedScenes: 0,
       currentSceneIndex: readyScenes[0].orderIndex,
-      currentStep: `Starting ${qualityMode} render for ${readyScenes.length} scenes...`,
+      currentStep: `Starting LTX render for ${readyScenes.length} scenes...`,
       scenes: sceneMap,
       error: null,
       startedAt: Date.now(),
@@ -1981,7 +1970,7 @@ app.post("/api/projects/:id/render", async (req: Request, res: Response) => {
     renderJobs.set(id, job);
 
     // Fire background render without blocking HTTP response
-    void runRenderPipeline(id, falKey, job, qualityMode);
+    void runRenderPipeline(id, falKey, job);
 
     res.status(202).json({ job });
   } catch (err) {
