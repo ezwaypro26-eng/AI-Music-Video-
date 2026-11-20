@@ -5,6 +5,8 @@ import secrets
 import tempfile
 
 import modal
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import Response
 
 MODEL_ID = "Lightricks/LTX-2.5-Diffusers"
 CACHE_DIR = "/cache/huggingface"
@@ -33,7 +35,7 @@ image = (
     .env({"HF_HOME": CACHE_DIR})
 )
 
-web = __import__("fastapi").FastAPI()
+web = FastAPI()
 _pipeline = None
 
 
@@ -111,9 +113,7 @@ def generate_video(image_b64: str, prompt: str, aspect_ratio: str = "16:9", seed
 
 
 @web.post("/submit")
-async def submit(request: __import__("fastapi").Request):
-    from fastapi import HTTPException
-
+async def submit(request: Request):
     _authorize(request)
     payload = await request.json()
     image_b64 = str(payload.get("image_base64") or "")
@@ -130,10 +130,7 @@ async def submit(request: __import__("fastapi").Request):
 
 
 @web.get("/result/{call_id}")
-async def result(call_id: str, request: __import__("fastapi").Request):
-    from fastapi import HTTPException
-    from fastapi.responses import Response
-
+async def result(call_id: str, request: Request):
     _authorize(request)
     try:
         video_bytes = modal.FunctionCall.from_id(call_id).get(timeout=0)
@@ -151,9 +148,7 @@ async def result(call_id: str, request: __import__("fastapi").Request):
     )
 
 
-def _authorize(request):
-    from fastapi import HTTPException
-
+def _authorize(request: Request):
     expected = os.environ.get("APP_API_TOKEN", "")
     supplied = request.headers.get("authorization", "")
     if not expected or not secrets.compare_digest(supplied, f"Bearer {expected}"):
