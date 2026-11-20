@@ -1,0 +1,57 @@
+name: Deploy LTX-2.5 to Modal
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "modal/**"
+      - ".github/workflows/deploy-modal-ltx.yml"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install app dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check TypeScript
+        run: bun run lint
+
+      - name: Build the existing app
+        run: bun run build
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check Modal service syntax
+        run: python -m py_compile modal/ltx_app.py
+
+      - name: Install Modal
+        run: python -m pip install --upgrade modal
+
+      - name: Deploy LTX-2.5 service
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: modal deploy modal/ltx_app.py
+
+      - name: Print Modal service URL
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          python - <<'PY'
+          import modal
+          fn = modal.Function.from_name("ai-music-creater-ltx", "web_app")
+          print("MODAL_LTX_URL=" + str(fn.get_web_url()))
+          PY

@@ -2155,23 +2155,13 @@ export const MvStudio: React.FC<MvStudioProps> = ({
               <span className="block text-xs font-medium text-zinc-300">
                 Choose B-Roll Video Engine
               </span>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <div className="grid grid-cols-1 gap-2.5">
                 {(
                   [
                     {
-                      id: "budget",
-                      title: "Wan 2.2 Budget",
-                      meta: "~$0.08/shot · Fastest",
-                    },
-                    {
                       id: "turbo",
-                      title: "Kling 2.5 Turbo",
-                      meta: "~$0.35/shot · 4× savings",
-                    },
-                    {
-                      id: "master",
-                      title: "Kling v2 Master",
-                      meta: "~$1.40/shot · Max tier",
+                      title: "LTX-2.5 on Modal",
+                      meta: "Image-to-video · serverless GPU",
                     },
                   ] as const
                 ).map((preset) => {

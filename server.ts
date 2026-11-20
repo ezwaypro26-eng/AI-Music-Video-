@@ -78,6 +78,81 @@ function getFalKey(): string | null {
   return key;
 }
 
+function getModalLtxConfig(): { url: string; token: string } | null {
+  const url = process.env.MODAL_LTX_URL?.trim().replace(/\/+$/, "");
+  const token = process.env.MODAL_LTX_API_TOKEN?.trim();
+  if (!url || !token) return null;
+  return { url, token };
+}
+
+async function generateVideoWithModalLtx(
+  imageAbsPath: string,
+  prompt: string,
+  aspectRatio: string,
+  targetAbsPath: string
+): Promise<void> {
+  const config = getModalLtxConfig();
+  if (!config) {
+    throw new Error("Modal LTX is not connected yet. Add MODAL_LTX_URL and MODAL_LTX_API_TOKEN to the app's environment settings.");
+  }
+  if (!fs.existsSync(imageAbsPath)) {
+    throw new Error("The storyboard image for this LTX scene could not be found.");
+  }
+
+  const imageBase64 = fs.readFileSync(imageAbsPath).toString("base64");
+  const submitResponse = await fetch(`${config.url}/submit`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${config.token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      image_base64: imageBase64,
+      prompt,
+      aspect_ratio: aspectRatio,
+    }),
+  });
+  if (!submitResponse.ok) {
+    const detail = await submitResponse.text();
+    throw new Error(`Modal LTX could not accept the scene (${submitResponse.status}): ${detail.slice(0, 500)}`);
+  }
+
+  const submitted = (await submitResponse.json()) as { call_id?: string };
+  if (!submitted.call_id) {
+    throw new Error("Modal LTX did not return a generation job ID.");
+  }
+
+  const deadline = Date.now() + 45 * 60 * 1000;
+  while (Date.now() < deadline) {
+    const resultResponse = await fetch(
+      `${config.url}/result/${encodeURIComponent(submitted.call_id)}`,
+      { headers: { authorization: `Bearer ${config.token}` } }
+    );
+    if (!resultResponse.ok) {
+      const detail = await resultResponse.text();
+      throw new Error(`Modal LTX scene failed (${resultResponse.status}): ${detail.slice(0, 500)}`);
+    }
+
+    const contentType = resultResponse.headers.get("content-type") || "";
+    if (contentType.includes("video/mp4")) {
+      const video = Buffer.from(await resultResponse.arrayBuffer());
+      if (video.length < 1024) {
+        throw new Error("Modal LTX returned an empty or incomplete video.");
+      }
+      fs.writeFileSync(targetAbsPath, video);
+      return;
+    }
+
+    const status = (await resultResponse.json()) as { status?: string; detail?: string };
+    if (status.status === "failed") {
+      throw new Error(status.detail || "Modal LTX generation failed.");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+  }
+
+  throw new Error("Modal LTX took too long to finish this scene. Check the Modal app logs before retrying.");
+}
+
 function getGeminiKey(): string | null {
   const key = process.env.GEMINI_API_KEY?.trim();
   if (!key || key === "MY_GEMINI_API_KEY") return null;
@@ -276,6 +351,7 @@ app.get("/api/capabilities", async (_req: Request, res: Response) => {
   }
   res.json({
     falConfigured: Boolean(getFalKey()),
+    modalVideoConfigured: Boolean(getModalLtxConfig()),
     geminiConfigured: Boolean(getGeminiKey()),
     openaiConfigured: Boolean(getOpenAiKey()),
     ffmpegAvailable: hasFfmpeg,
@@ -1694,12 +1770,7 @@ async function runRenderPipeline(
               ? "1:1"
               : "16:9";
 
-          const modeLabel =
-            qualityMode === "budget"
-              ? "Animating via Wan 2.2 (Budget)..."
-              : qualityMode === "master"
-              ? "Animating via Kling v2 Master..."
-              : "Animating via Kling 2.5 Turbo...";
+          const modeLabel = "Animating via LTX-2.5 on Modal...";
 
           job.scenes[s.id] = {
             orderIndex: s.orderIndex,
@@ -1708,49 +1779,7 @@ async function runRenderPipeline(
             label: modeLabel,
           };
 
-          const imgExt = path.extname(srcImgAbs).toLowerCase();
-          const imgMime = imgExt === ".png" ? "image/png" : imgExt === ".webp" ? "image/webp" : "image/jpeg";
-          const imageUrl = await uploadLocalFileToFal(srcImgAbs, imgMime);
-
-          let outVideoUrl: string | undefined;
-
-          if (qualityMode === "budget") {
-            const wanRes = await fal.subscribe("fal-ai/wan/v2.2-a14b/image-to-video", {
-              input: {
-                prompt: motionPrompt,
-                image_url: imageUrl,
-                resolution: "720p",
-                aspect_ratio: ratioArg,
-                frames_per_second: 24,
-              },
-            });
-            outVideoUrl = (wanRes.data as { video?: { url?: string } })?.video?.url;
-          } else if (qualityMode === "master") {
-            const klingRes = await fal.subscribe("fal-ai/kling-video/v2/master/image-to-video", {
-              input: {
-                prompt: motionPrompt,
-                image_url: imageUrl,
-                duration: "5",
-                aspect_ratio: ratioArg,
-              },
-            });
-            outVideoUrl = (klingRes.data as { video?: { url?: string } })?.video?.url;
-          } else {
-            // Default "turbo" -> fal-ai/kling-video/v2.5-turbo/pro/image-to-video (4x cheaper & faster)
-            const turboRes = await fal.subscribe("fal-ai/kling-video/v2.5-turbo/pro/image-to-video", {
-              input: {
-                prompt: motionPrompt,
-                image_url: imageUrl,
-                duration: "5",
-              },
-            });
-            outVideoUrl = (turboRes.data as { video?: { url?: string } })?.video?.url;
-          }
-
-          if (!outVideoUrl) {
-            throw new Error(`Video generation (${qualityMode}) returned no video URL for Shot ${shotNum}.`);
-          }
-          await downloadRemoteFile(outVideoUrl, rawClipAbs);
+          await generateVideoWithModalLtx(srcImgAbs, motionPrompt, ratioArg, rawClipAbs);
         }
 
         // Trim/scale downloaded clip to exact (endSec - startSec) at 24fps (1920x1080 or 1080x1920)
@@ -1972,7 +2001,7 @@ app.post("/api/projects/:id/render", async (req: Request, res: Response) => {
       totalScenes: readyScenes.length,
       completedScenes: 0,
       currentSceneIndex: readyScenes[0].orderIndex,
-      currentStep: `Starting ${qualityMode} render for ${readyScenes.length} scenes...`,
+      currentStep: `Starting LTX-2.5 render for ${readyScenes.length} scenes...`,
       scenes: sceneMap,
       error: null,
       startedAt: Date.now(),
