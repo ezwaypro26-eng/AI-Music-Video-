@@ -2159,19 +2159,9 @@ export const MvStudio: React.FC<MvStudioProps> = ({
                 {(
                   [
                     {
-                      id: "budget",
-                      title: "Wan 2.2 Budget",
-                      meta: "~$0.08/shot · Fastest",
-                    },
-                    {
                       id: "turbo",
-                      title: "Kling 2.5 Turbo",
-                      meta: "~$0.35/shot · 4× savings",
-                    },
-                    {
-                      id: "master",
-                      title: "Kling v2 Master",
-                      meta: "~$1.40/shot · Max tier",
+                      title: "LTX-2.5 on Modal",
+                      meta: "Image-to-video · serverless GPU",
                     },
                   ] as const
                 ).map((preset) => {
