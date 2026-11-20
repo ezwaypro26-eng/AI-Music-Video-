@@ -279,7 +279,6 @@ export const MvStudio: React.FC<MvStudioProps> = ({
         if (cancelled || !data) return;
         const job: RenderJob | null = data.job || null;
         setRenderJob(job);
-        if (job?.qualityMode) setRenderQualityMode(job.qualityMode);
         setRenderingVideo(job?.status === "running");
       })
       .catch(() => {
@@ -2146,7 +2145,7 @@ export const MvStudio: React.FC<MvStudioProps> = ({
                   )}
                 </p>
               </div>
-              <span className="text-xs text-zinc-400 font-mono shrink-0">5 parallel workers</span>
+              <span className="text-xs text-zinc-400 font-mono shrink-0">LTX · one GPU job at a time</span>
             </div>
 
             <div className="rounded-xl border border-amber-500/40 bg-amber-500/5 px-4 py-3">
