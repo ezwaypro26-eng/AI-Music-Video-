@@ -54,6 +54,7 @@ ltx_image = (
     max_containers=1,
     scaledown_window=60,
     timeout=60 * 30,
+    startup_timeout=60 * 30,
 )
 @modal.asgi_app()
 def ltx_api():
