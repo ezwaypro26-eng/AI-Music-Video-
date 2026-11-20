@@ -87,8 +87,8 @@ def ltx_api():
     if not api_token:
         raise RuntimeError("LTX_API_TOKEN is missing from the Modal Secret.")
 
-    transformer = MODEL_ROOT / MODEL_FILES[0]
-    if not transformer.exists():
+    required_model_files = [MODEL_ROOT / filename for filename in MODEL_FILES]
+    if not all(file_path.is_file() for file_path in required_model_files):
         snapshot_download(
             repo_id="Lightricks/LTX-2.5",
             allow_patterns=MODEL_FILES,
