@@ -2,7 +2,7 @@ import base64
 import io
 import os
 import secrets
-from typing import Optional
+import tempfile
 
 import modal
 
@@ -56,6 +56,7 @@ def _load_pipeline():
     )
     _pipeline.enable_sequential_cpu_offload(device="cuda")
     _pipeline.vae.enable_tiling()
+    model_cache.commit()
     return _pipeline
 
 
@@ -101,9 +102,10 @@ def generate_video(image_b64: str, prompt: str, aspect_ratio: str = "16:9", seed
         return_dict=False,
     )
 
-    output = io.BytesIO()
-    encode_video(video[0], fps=24.0, output_path=output)
-    return output.getvalue()
+    with tempfile.NamedTemporaryFile(suffix=".mp4") as output_file:
+        encode_video(video[0], fps=24.0, output_path=output_file.name)
+        output_file.seek(0)
+        return output_file.read()
 
 
 @web.post("/submit")
