@@ -27,7 +27,6 @@ import type {
   MusicVideoType,
   Project,
   RenderJob,
-  RenderQualityMode,
   Scene,
   SongScopeMode,
 } from "../types/studio";
@@ -203,7 +202,6 @@ export const MvStudio: React.FC<MvStudioProps> = ({
   const [generatingStoryboard, setGeneratingStoryboard] = useState(false);
   const [generatingKeyframes, setGeneratingKeyframes] = useState(false);
   const [renderingVideo, setRenderingVideo] = useState(false);
-  const [renderQualityMode, setRenderQualityMode] = useState<RenderQualityMode>("turbo");
   const [renderJob, setRenderJob] = useState<RenderJob | null>(null);
   const [analyzingAudio, setAnalyzingAudio] = useState(false);
   const [sceneBusy, setSceneBusy] = useState<Record<string, string>>({});
@@ -775,7 +773,7 @@ export const MvStudio: React.FC<MvStudioProps> = ({
       const res = await fetch(`/api/projects/${activeProject.id}/render`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ qualityMode: renderQualityMode }),
+        body: JSON.stringify({}),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -2151,51 +2149,11 @@ export const MvStudio: React.FC<MvStudioProps> = ({
               <span className="text-xs text-zinc-400 font-mono shrink-0">5 parallel workers</span>
             </div>
 
-            <div className="space-y-2">
-              <span className="block text-xs font-medium text-zinc-300">
-                Choose B-Roll Video Engine
-              </span>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                {(
-                  [
-                    {
-                      id: "budget",
-                      title: "Wan 2.2 Budget",
-                      meta: "~$0.08/shot · Fastest",
-                    },
-                    {
-                      id: "turbo",
-                      title: "Kling 2.5 Turbo",
-                      meta: "~$0.35/shot · 4× savings",
-                    },
-                    {
-                      id: "master",
-                      title: "Kling v2 Master",
-                      meta: "~$1.40/shot · Max tier",
-                    },
-                  ] as const
-                ).map((preset) => {
-                  const active = renderQualityMode === preset.id;
-                  return (
-                    <button
-                      key={preset.id}
-                      type="button"
-                      disabled={renderingVideo}
-                      onClick={() => setRenderQualityMode(preset.id)}
-                      className={`min-h-[52px] px-4 py-2.5 rounded-xl border text-left transition-colors ${
-                        active
-                          ? "bg-amber-500/15 border-amber-500 text-amber-100"
-                          : "bg-zinc-950 border-zinc-800 text-zinc-300 hover:border-zinc-700"
-                      }`}
-                    >
-                      <p className="text-sm font-semibold">{preset.title}</p>
-                      <p className="text-xs font-mono text-zinc-400 mt-0.5">
-                        {preset.meta}
-                      </p>
-                    </button>
-                  );
-                })}
-              </div>
+            <div className="rounded-xl border border-amber-500/40 bg-amber-500/5 px-4 py-3">
+              <p className="text-sm font-semibold text-amber-100">B-roll engine: LTX-2.5 on Modal</p>
+              <p className="text-xs text-zinc-400 mt-1">
+                All B-roll shots use the LTX image-to-video model. Lip-sync remains on the separate sync-lipsync service.
+              </p>
             </div>
 
             <button
