@@ -2001,7 +2001,7 @@ app.post("/api/projects/:id/render", async (req: Request, res: Response) => {
       totalScenes: readyScenes.length,
       completedScenes: 0,
       currentSceneIndex: readyScenes[0].orderIndex,
-      currentStep: `Starting ${qualityMode} render for ${readyScenes.length} scenes...`,
+      currentStep: `Starting LTX-2.5 render for ${readyScenes.length} scenes...`,
       scenes: sceneMap,
       error: null,
       startedAt: Date.now(),
