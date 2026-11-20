@@ -442,11 +442,20 @@ app.get("/api/projects", async (_req: Request, res: Response) => {
   }
 });
 
+const VALID_VIDEO_TYPES = ["narrative", "performance", "visualizer", "hype", "retro"] as const;
+type MusicVideoType = (typeof VALID_VIDEO_TYPES)[number];
+
+function normalizeVideoType(val: unknown): MusicVideoType {
+  const s = String(val || "").toLowerCase();
+  return (VALID_VIDEO_TYPES as readonly string[]).includes(s) ? (s as MusicVideoType) : "narrative";
+}
+
 app.post("/api/projects", async (req: Request, res: Response) => {
   try {
     const title = String(req.body?.title || "Untitled Music Video").trim();
     const concept = String(req.body?.concept || "").trim();
     const aspectRatio = ["16:9", "9:16", "1:1"].includes(req.body?.aspectRatio) ? req.body.aspectRatio : "16:9";
+    const videoType = normalizeVideoType(req.body?.videoType);
     const rawLyrics = String(req.body?.rawLyrics || "");
     const characterId = req.body?.characterId ? String(req.body.characterId) : null;
 
@@ -455,6 +464,7 @@ app.post("/api/projects", async (req: Request, res: Response) => {
         title,
         concept,
         aspectRatio,
+        videoType,
         rawLyrics,
         characterId,
         status: "draft",
@@ -480,6 +490,9 @@ app.patch("/api/projects/:id", async (req: Request, res: Response) => {
     if (req.body?.concept !== undefined) data.concept = String(req.body.concept);
     if (req.body?.aspectRatio !== undefined && ["16:9", "9:16", "1:1"].includes(req.body.aspectRatio)) {
       data.aspectRatio = req.body.aspectRatio;
+    }
+    if (req.body?.videoType !== undefined) {
+      data.videoType = normalizeVideoType(req.body.videoType);
     }
     if (req.body?.rawLyrics !== undefined) data.rawLyrics = String(req.body.rawLyrics);
     if (req.body?.lyricsJson !== undefined) data.lyricsJson = String(req.body.lyricsJson);
@@ -778,6 +791,9 @@ app.post("/api/projects/:id/split-lyrics", async (req: Request, res: Response) =
     const secPerScene = Math.max(2, Math.min(16, Number(req.body?.secPerScene) || 4));
     const useAiDirector = Boolean(req.body?.useAiDirector);
     const useWhisperTimestamps = Boolean(req.body?.useWhisperTimestamps);
+    const scopeMode = req.body?.scopeMode === "section" ? "section" : "full";
+    const sectionStartSec = Math.max(0, Number(req.body?.sectionStartSec) || 0);
+    const sectionEndSec = Number(req.body?.sectionEndSec) || 0;
 
     let whisperSegments: Array<{ orderIndex: number; startSec: number; endSec: number; text: string }> = [];
     try {
@@ -789,9 +805,16 @@ app.post("/api/projects/:id/split-lyrics", async (req: Request, res: Response) =
       whisperSegments = [];
     }
 
+    const filteredWhisperSegments =
+      scopeMode === "section" && sectionEndSec > sectionStartSec
+        ? whisperSegments.filter(
+            (seg) => Number(seg.endSec) > sectionStartSec && Number(seg.startSec) < sectionEndSec
+          )
+        : whisperSegments;
+
     const lines =
-      useWhisperTimestamps && whisperSegments.length > 0
-        ? whisperSegments.map((s) => s.text.trim())
+      useWhisperTimestamps && filteredWhisperSegments.length > 0
+        ? filteredWhisperSegments.map((s) => s.text.trim())
         : rawLyrics
             .split(/\r?\n/)
             .map((l) => l.trim())
@@ -874,12 +897,12 @@ Return a JSON array where each element has:
     }
     await prisma.scene.deleteMany({ where: { projectId: id } });
 
-    let cursor = 0;
+    let cursor = scopeMode === "section" ? sectionStartSec : 0;
     const lyricsTimeline: Array<{ orderIndex: number; startSec: number; endSec: number; text: string }> = [];
 
     for (let i = 0; i < draftedScenes.length; i++) {
       const item = draftedScenes[i];
-      const matchedWhisper = useWhisperTimestamps ? whisperSegments[i] : undefined;
+      const matchedWhisper = useWhisperTimestamps ? filteredWhisperSegments[i] : undefined;
       const startSec = matchedWhisper ? Number(matchedWhisper.startSec) : Number(cursor.toFixed(1));
       const endSec = matchedWhisper
         ? Number(matchedWhisper.endSec)
@@ -931,6 +954,19 @@ Return a JSON array where each element has:
 // ---------- AI Director Storyboard (OpenAI gpt-4o Structured JSON) ----------
 const DIRECTOR_FRAMINGS = ["Wide", "Close-Up", "Low Angle", "Tracking"];
 
+const MUSIC_VIDEO_TYPE_DIRECTIONS: Record<MusicVideoType, string> = {
+  narrative:
+    "Style: Narrative + Performance. Blend cinematic story B-roll scenes (around 60%) with emotional lip-synced vocal performance shots on choruses and key hooks (around 40%).",
+  performance:
+    "Style: Pure Performance / Lip-Sync Focus. Keep the artist front-and-center singing directly to camera (`shotType: 'lipsync'` for ~75-85% of shots) across moody studio, spotlight, or concert setups, using `broll` only for brief instrumental breathers.",
+  visualizer:
+    "Style: Cinematic B-Roll / Visualizer. Focus heavily on atmospheric visual storytelling, mood, and environmental metaphors (`shotType: 'broll'` for ~85-90% of shots, saving `lipsync` only for 1-2 peak chorus moments).",
+  hype:
+    "Style: High-Energy Rap / Dance Cut. Emphasize bold low-angle hero framing, rapid kinetic energy, club/street neon lighting, confident lip-sync hooks (`lipsync` on chorus/hook), and punchy kinetic B-roll.",
+  retro:
+    "Style: Retro 90s VHS / Analog Film. Warm halation, nostalgic 35mm film grain, candid late-night locations, intimate camcorder/stage textures, balancing soulful lip-sync and vintage B-roll.",
+};
+
 app.post("/api/projects/:id/generate-storyboard", async (req: Request, res: Response) => {
   const id = String(req.params.id);
 
@@ -959,6 +995,10 @@ app.post("/api/projects/:id/generate-storyboard", async (req: Request, res: Resp
       req.body?.aspectRatio !== undefined && ["16:9", "9:16", "1:1"].includes(req.body.aspectRatio)
         ? String(req.body.aspectRatio)
         : existingProject.aspectRatio;
+    const nextVideoType =
+      req.body?.videoType !== undefined
+        ? normalizeVideoType(req.body.videoType)
+        : normalizeVideoType(existingProject.videoType);
     const nextCharacterId =
       req.body?.characterId !== undefined
         ? req.body.characterId
@@ -973,6 +1013,7 @@ app.post("/api/projects/:id/generate-storyboard", async (req: Request, res: Resp
         concept,
         rawLyrics,
         aspectRatio: nextAspectRatio,
+        videoType: nextVideoType,
         characterId: nextCharacterId,
       },
       include: { character: true },
@@ -991,21 +1032,38 @@ app.post("/api/projects/:id/generate-storyboard", async (req: Request, res: Resp
     const audioDuration = await getAudioDurationSec(project.audioPath);
     const whisperEnd =
       whisperSegments.length > 0 ? Math.max(...whisperSegments.map((s) => Number(s.endSec) || 0)) : 0;
-    const totalDurationSec = Number(Math.max(12, audioDuration || whisperEnd || 36).toFixed(1));
+    const songDurationSec = Number(Math.max(12, audioDuration || whisperEnd || 36).toFixed(1));
 
+    const scopeMode = req.body?.scopeMode === "section" ? "section" : "full";
+    const rangeStart =
+      scopeMode === "section"
+        ? Number(Math.max(0, Math.min(songDurationSec - 4, Number(req.body?.sectionStartSec) || 0)).toFixed(1))
+        : 0;
+    const requestedEnd = Number(req.body?.sectionEndSec);
+    const rangeEnd =
+      scopeMode === "section"
+        ? Number(
+            Math.min(
+              songDurationSec,
+              Math.max(rangeStart + 4, Number.isFinite(requestedEnd) && requestedEnd > 0 ? requestedEnd : rangeStart + 30)
+            ).toFixed(1)
+          )
+        : songDurationSec;
+
+    const targetSpanSec = Number((rangeEnd - rangeStart).toFixed(1));
     const openai = new OpenAI({ apiKey: openAiKey });
 
-    // Split full song into ~45s windows run in parallel so even 4-5 min songs complete in ~12s without timeouts
+    // Split selected range (or full song) into ~45s windows run in parallel
     const WINDOW_SEC = 45;
     const windows: Array<{ index: number; start: number; end: number }> = [];
-    if (totalDurationSec <= 55) {
-      windows.push({ index: 0, start: 0, end: totalDurationSec });
+    if (targetSpanSec <= 55) {
+      windows.push({ index: 0, start: rangeStart, end: rangeEnd });
     } else {
-      let wStart = 0;
+      let wStart = rangeStart;
       let idx = 0;
-      while (wStart < totalDurationSec - 1) {
-        const remaining = totalDurationSec - wStart;
-        const wEnd = remaining <= 55 ? totalDurationSec : Number((wStart + WINDOW_SEC).toFixed(1));
+      while (wStart < rangeEnd - 1) {
+        const remaining = rangeEnd - wStart;
+        const wEnd = remaining <= 55 ? rangeEnd : Number((wStart + WINDOW_SEC).toFixed(1));
         windows.push({ index: idx, start: wStart, end: wEnd });
         wStart = wEnd;
         idx += 1;
@@ -1053,27 +1111,32 @@ app.post("/api/projects/:id/generate-storyboard", async (req: Request, res: Resp
       ? { name: project.character.name, visualPrompt: project.character.visualPrompt }
       : { name: "Lead Vocalist", visualPrompt: "Expressive performing singer in stylish evening wardrobe" };
 
+    const styleGuidance = MUSIC_VIDEO_TYPE_DIRECTIONS[nextVideoType];
+
     const chunkResults = await Promise.all(
       windows.map(async (win) => {
         const winDur = Number((win.end - win.start).toFixed(1));
-        const targetShots = Math.max(2, Math.round(winDur / 4.5));
+        const targetShots = Math.max(1, Math.round(winDur / 4.5));
         const localSegments = whisperSegments.filter(
           (seg) => Number(seg.endSec) >= win.start - 1 && Number(seg.startSec) <= win.end + 1
         );
 
-        const systemPrompt = `You are an elite Music Video Director directing Act ${win.index + 1} of ${windows.length} (${win.start}s to ${win.end}s of a ${totalDurationSec}s song).
+        const systemPrompt = `You are an elite Music Video Director directing Act ${win.index + 1} of ${windows.length} (${win.start}s to ${win.end}s of a ${songDurationSec}s song, ${scopeMode === "section" ? "selected song section" : "full song"}).
+${styleGuidance}
 Create exactly ${targetShots} consecutive Scene rows covering ${win.start}s to ${win.end}s with ZERO time gaps.
 Rules:
 1. Every scene MUST have duration between 4.0 and 5.5 seconds, consecutive with zero gaps: scene[0].startSec = ${win.start}, scene[i].startSec = scene[i-1].endSec, final scene endSec = ${win.end}.
-2. Mark emotional vocal/chorus lines as shotType: "lipsync" and verses, intros, bridges, or instrumentals as shotType: "broll".
+2. Follow the Music Video Style above when choosing shotType: "lipsync" vs "broll".
 3. Alternate camera framing every shot in rotation: Wide, Close-Up, Low Angle, Tracking.
 4. Output TWO strictly separated prompts per scene (concise, vivid, 1-2 sentences each):
-   - imagePrompt: Describe subject (matching Character visualPrompt), outfit, lighting, environment, and 35mm cinema film look. NO camera movement words (never write pan, zoom, dolly, tracking, tilt, crane, orbit, handheld, push-in, pull-back).
+   - imagePrompt: Describe subject (matching Character visualPrompt), outfit, lighting, environment, and 35mm cinema film look matching the chosen style. NO camera movement words (never write pan, zoom, dolly, tracking, tilt, crane, orbit, handheld, push-in, pull-back).
    - motionPrompt: Pure camera movement and subject motion only (include the framing style).`;
 
         const userPayload = {
           title: project.title,
           aspectRatio: project.aspectRatio,
+          musicVideoType: nextVideoType,
+          scopeMode,
           windowStartSec: win.start,
           windowEndSec: win.end,
           targetShotCount: targetShots,
@@ -1121,7 +1184,7 @@ Rules:
       throw new Error("GPT-4o did not return any storyboard scenes.");
     }
 
-    // Normalize timeline to guarantee consecutive 4.0-5.5s shots with zero time gaps
+    // Normalize timeline to guarantee consecutive 4.0-5.5s shots starting at rangeStart with zero gaps
     const existingScenes = await prisma.scene.findMany({ where: { projectId: id } });
     for (const s of existingScenes) {
       deletePublicAsset(s.imagePath);
@@ -1129,7 +1192,7 @@ Rules:
     }
     await prisma.scene.deleteMany({ where: { projectId: id } });
 
-    let cursor = 0;
+    let cursor = rangeStart;
     for (let i = 0; i < rawScenes.length; i++) {
       const item = rawScenes[i];
       const rawDur = Number(item.endSec) - Number(item.startSec);
@@ -1776,6 +1839,7 @@ async function runRenderPipeline(
 
     const finalOutAbs = path.join(projectDir, "final.mp4");
     const hasSong = Boolean(songAbs && fs.existsSync(songAbs));
+    const timelineStartSec = Math.max(0, Number(readyScenes[0]?.startSec) || 0);
 
     if (hasSong && songAbs) {
       await execFileAsync("ffmpeg", [
@@ -1786,6 +1850,7 @@ async function runRenderPipeline(
         "0",
         "-i",
         concatFileAbs,
+        ...(timelineStartSec > 0 ? ["-ss", String(timelineStartSec)] : []),
         "-i",
         songAbs,
         "-map",
@@ -1967,6 +2032,7 @@ async function ensureSqliteSchema() {
       "title" TEXT NOT NULL,
       "concept" TEXT NOT NULL DEFAULT '',
       "aspectRatio" TEXT NOT NULL DEFAULT '16:9',
+      "videoType" TEXT NOT NULL DEFAULT 'narrative',
       "rawLyrics" TEXT NOT NULL DEFAULT '',
       "lyricsJson" TEXT NOT NULL DEFAULT '[]',
       "audioPath" TEXT,
@@ -1979,6 +2045,10 @@ async function ensureSqliteSchema() {
       CONSTRAINT "Project_characterId_fkey" FOREIGN KEY ("characterId") REFERENCES "Character" ("id") ON DELETE SET NULL ON UPDATE CASCADE
     );
   `);
+  const projectCols = (await prisma.$queryRawUnsafe(`PRAGMA table_info("Project");`)) as Array<{ name: string }>;
+  if (!projectCols.some((c) => c.name === "videoType")) {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "Project" ADD COLUMN "videoType" TEXT NOT NULL DEFAULT 'narrative';`);
+  }
   await prisma.$executeRawUnsafe(`
     CREATE TABLE IF NOT EXISTS "Scene" (
       "id" TEXT NOT NULL PRIMARY KEY,

@@ -22,7 +22,15 @@ import {
   Video,
   Wand2,
 } from "lucide-react";
-import type { Character, Project, RenderJob, RenderQualityMode, Scene } from "../types/studio";
+import type {
+  Character,
+  MusicVideoType,
+  Project,
+  RenderJob,
+  RenderQualityMode,
+  Scene,
+  SongScopeMode,
+} from "../types/studio";
 
 interface MvStudioProps {
   projects: Project[];
@@ -58,6 +66,63 @@ const SHOT_TYPES = [
   "Extreme Close-Up",
   "Silhouette Backlit",
 ];
+
+const MUSIC_VIDEO_TYPES: ReadonlyArray<{
+  id: MusicVideoType;
+  label: string;
+  shortLabel: string;
+  mixNote: string;
+  desc: string;
+}> = [
+  {
+    id: "narrative",
+    label: "Narrative + Performance",
+    shortLabel: "Narrative",
+    mixNote: "~60% B-roll · 40% Lip-sync",
+    desc: "Cinematic story scenes blended with vocal hooks.",
+  },
+  {
+    id: "performance",
+    label: "Pure Performance",
+    shortLabel: "Performance",
+    mixNote: "~80% Lip-sync · Spotlight",
+    desc: "Artist front-and-center singing to camera.",
+  },
+  {
+    id: "visualizer",
+    label: "Cinematic Visualizer",
+    shortLabel: "Visualizer",
+    mixNote: "~85% Moody B-roll · Story",
+    desc: "Atmospheric visual metaphors & minimal lip-sync.",
+  },
+  {
+    id: "hype",
+    label: "High-Energy Rap / Dance",
+    shortLabel: "High-Energy",
+    mixNote: "Low-angle hero · Kinetic",
+    desc: "Punchy hooks, dynamic movement, club & street neon.",
+  },
+  {
+    id: "retro",
+    label: "Retro 90s VHS / Film",
+    shortLabel: "Retro 90s",
+    mixNote: "35mm halation · Analog",
+    desc: "Nostalgic warm grain, late-night handheld intimacy.",
+  },
+];
+
+function normalizeMusicVideoType(value?: string | null): MusicVideoType {
+  if (
+    value === "narrative" ||
+    value === "performance" ||
+    value === "visualizer" ||
+    value === "hype" ||
+    value === "retro"
+  ) {
+    return value;
+  }
+  return "narrative";
+}
 
 function formatTimecode(seconds: number): string {
   const safe = Math.max(0, seconds);
@@ -105,6 +170,7 @@ export const MvStudio: React.FC<MvStudioProps> = ({
   const [newTitle, setNewTitle] = useState("");
   const [newConcept, setNewConcept] = useState("");
   const [newAspectRatio, setNewAspectRatio] = useState<"16:9" | "9:16">("16:9");
+  const [newVideoType, setNewVideoType] = useState<MusicVideoType>("narrative");
   const [newCharacterId, setNewCharacterId] = useState<string>(preselectedCharacterId || "");
   const [newRawLyrics, setNewRawLyrics] = useState("");
   const [newAudioFile, setNewAudioFile] = useState<File | null>(null);
@@ -116,9 +182,16 @@ export const MvStudio: React.FC<MvStudioProps> = ({
   const [title, setTitle] = useState("");
   const [concept, setConcept] = useState("");
   const [aspectRatio, setAspectRatio] = useState<string>("16:9");
+  const [videoType, setVideoType] = useState<MusicVideoType>("narrative");
   const [characterId, setCharacterId] = useState<string>("");
   const [rawLyrics, setRawLyrics] = useState("");
   const [secPerScene, setSecPerScene] = useState(4);
+
+  // Song coverage (Full Song vs Choose Section)
+  const [scopeMode, setScopeMode] = useState<SongScopeMode>("full");
+  const [sectionStartSec, setSectionStartSec] = useState<number>(0);
+  const [sectionEndSec, setSectionEndSec] = useState<number>(30);
+  const [songDurationSec, setSongDurationSec] = useState<number | null>(null);
 
   // Playback timecode for iPad tap-to-timestamp
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -152,6 +225,7 @@ export const MvStudio: React.FC<MvStudioProps> = ({
     setTitle(activeProject.title);
     setConcept(activeProject.concept || "");
     setAspectRatio(activeProject.aspectRatio || "16:9");
+    setVideoType(normalizeMusicVideoType(activeProject.videoType));
     setCharacterId(activeProject.characterId || "");
     setRawLyrics(activeProject.rawLyrics || "");
     setConfirmDeleteProj(false);
@@ -169,6 +243,28 @@ export const MvStudio: React.FC<MvStudioProps> = ({
     }
     setSceneDrafts(drafts);
   }, [activeProject]);
+
+  // Reset audio metadata / section defaults when switching to a different project
+  useEffect(() => {
+    setSongDurationSec(null);
+    setPlayheadSec(0);
+    if (!activeProject) {
+      setScopeMode("full");
+      setSectionStartSec(0);
+      setSectionEndSec(30);
+      return;
+    }
+    const scenes = activeProject.scenes || [];
+    if (scenes.length > 0 && Number(scenes[0].startSec) >= 2) {
+      setScopeMode("section");
+      setSectionStartSec(Number(scenes[0].startSec));
+      setSectionEndSec(Number(scenes[scenes.length - 1].endSec));
+    } else {
+      setScopeMode("full");
+      setSectionStartSec(0);
+      setSectionEndSec(30);
+    }
+  }, [activeProject?.id]);
 
   // Sync active render job when switching projects
   useEffect(() => {
@@ -240,6 +336,32 @@ export const MvStudio: React.FC<MvStudioProps> = ({
     [activeProject?.lyricsJson]
   );
 
+  const effectiveDurationSec = useMemo(() => {
+    if (songDurationSec && songDurationSec > 0) return Number(songDurationSec.toFixed(1));
+    if (timestampSegments.length > 0) {
+      return Number(Math.max(...timestampSegments.map((s) => s.endSec)).toFixed(1));
+    }
+    if (activeProject?.scenes?.length) {
+      return Number(Math.max(...activeProject.scenes.map((s) => s.endSec)).toFixed(1));
+    }
+    return null;
+  }, [songDurationSec, timestampSegments, activeProject?.scenes]);
+
+  const clampedSectionEndSec = useMemo(() => {
+    const minEnd = Number((sectionStartSec + 4).toFixed(1));
+    const maxEnd = effectiveDurationSec ? Math.max(minEnd, effectiveDurationSec) : Math.max(minEnd, sectionEndSec);
+    return Number(Math.min(maxEnd, Math.max(minEnd, sectionEndSec)).toFixed(1));
+  }, [sectionStartSec, sectionEndSec, effectiveDurationSec]);
+
+  const applySectionWindow = (start: number, duration: number) => {
+    const safeStart = Math.max(0, Number(start.toFixed(1)));
+    const rawEnd = Number((safeStart + duration).toFixed(1));
+    const clampedEnd = effectiveDurationSec ? Math.min(effectiveDurationSec, rawEnd) : rawEnd;
+    setScopeMode("section");
+    setSectionStartSec(safeStart);
+    setSectionEndSec(Number(Math.max(safeStart + 4, clampedEnd).toFixed(1)));
+  };
+
   const handleSeekAudio = (sec: number) => {
     if (!audioRef.current) return;
     audioRef.current.currentTime = sec;
@@ -269,6 +391,7 @@ export const MvStudio: React.FC<MvStudioProps> = ({
           title: inferredTitle,
           concept: newConcept.trim(),
           aspectRatio: newAspectRatio,
+          videoType: newVideoType,
           rawLyrics: newRawLyrics,
           characterId: newCharacterId || null,
         }),
@@ -378,6 +501,7 @@ export const MvStudio: React.FC<MvStudioProps> = ({
           title,
           concept,
           aspectRatio,
+          videoType,
           rawLyrics,
           characterId: characterId || null,
         }),
@@ -395,11 +519,20 @@ export const MvStudio: React.FC<MvStudioProps> = ({
 
   const handleGenerateStoryboard = async () => {
     if (!activeProject) return;
+    if (scopeMode === "section" && clampedSectionEndSec <= sectionStartSec) {
+      setError("Section End must be greater than Section Start.");
+      return;
+    }
+
     setError(null);
     setStatusNotice(null);
     setGeneratingStoryboard(true);
+    const activeTypeLabel =
+      MUSIC_VIDEO_TYPES.find((t) => t.id === videoType)?.label || "Narrative + Performance";
     setProcessingStage(
-      "GPT-4o AI Director is breaking your song into consecutive 4.0–5.5s shots with alternating framing..."
+      scopeMode === "section"
+        ? `GPT-4o AI Director (${activeTypeLabel}) is directing ${formatTimecode(sectionStartSec)}–${formatTimecode(clampedSectionEndSec)} in consecutive 4.0–5.5s shots...`
+        : `GPT-4o AI Director (${activeTypeLabel}) is breaking your full song into consecutive 4.0–5.5s shots...`
     );
 
     try {
@@ -410,15 +543,21 @@ export const MvStudio: React.FC<MvStudioProps> = ({
           title,
           concept,
           aspectRatio,
+          videoType,
           rawLyrics,
           characterId: characterId || null,
+          scopeMode,
+          sectionStartSec,
+          sectionEndSec: clampedSectionEndSec,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to generate storyboard.");
       onProjectUpdated(data.project);
       setStatusNotice(
-        `GPT-4o Director created ${data.project.scenes.length} continuous storyboard shots.`
+        scopeMode === "section"
+          ? `GPT-4o (${activeTypeLabel}) created ${data.project.scenes.length} shots for ${formatTimecode(sectionStartSec)} – ${formatTimecode(clampedSectionEndSec)}.`
+          : `GPT-4o (${activeTypeLabel}) created ${data.project.scenes.length} continuous shots across the full track.`
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate storyboard.");
@@ -469,12 +608,19 @@ export const MvStudio: React.FC<MvStudioProps> = ({
           secPerScene,
           useAiDirector: Boolean(options.useAiDirector),
           useWhisperTimestamps: Boolean(options.useWhisperTimestamps),
+          scopeMode,
+          sectionStartSec,
+          sectionEndSec: clampedSectionEndSec,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to generate scenes.");
       onProjectUpdated(data.project);
-      setStatusNotice(`Created ${data.project.scenes.length} storyboard scenes.`);
+      setStatusNotice(
+        scopeMode === "section"
+          ? `Created ${data.project.scenes.length} storyboard scenes for ${formatTimecode(sectionStartSec)} – ${formatTimecode(clampedSectionEndSec)}.`
+          : `Created ${data.project.scenes.length} storyboard scenes.`
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate scenes.");
     } finally {
@@ -844,6 +990,35 @@ export const MvStudio: React.FC<MvStudioProps> = ({
             </div>
           </div>
 
+          <div className="space-y-2">
+            <span className="block text-sm font-medium text-zinc-200">
+              4. Music Video Type
+            </span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
+              {MUSIC_VIDEO_TYPES.map((mvType) => {
+                const selected = newVideoType === mvType.id;
+                return (
+                  <button
+                    key={mvType.id}
+                    type="button"
+                    onClick={() => setNewVideoType(mvType.id)}
+                    className={`min-h-[76px] p-3 rounded-xl border text-left transition-colors flex flex-col justify-between gap-1 ${
+                      selected
+                        ? "bg-amber-500/15 border-amber-500 text-amber-100"
+                        : "bg-zinc-950 border-zinc-800 text-zinc-300 hover:border-zinc-700"
+                    }`}
+                  >
+                    <div>
+                      <p className="text-sm font-semibold leading-tight">{mvType.shortLabel}</p>
+                      <p className="text-[11px] font-mono text-amber-400/90 mt-0.5">{mvType.mixNote}</p>
+                    </div>
+                    <p className="text-xs text-zinc-400 leading-snug">{mvType.desc}</p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <div className="space-y-2">
               <label htmlFor="new-proj-concept" className="block text-sm font-medium text-zinc-200">
@@ -1034,6 +1209,11 @@ export const MvStudio: React.FC<MvStudioProps> = ({
                   <p className="text-xs text-zinc-400 mt-0.5 tabular-nums">
                     <span className="font-mono">{activeProject.aspectRatio}</span>
                     <span aria-hidden="true"> · </span>
+                    <span>
+                      {MUSIC_VIDEO_TYPES.find((t) => t.id === normalizeMusicVideoType(activeProject.videoType))
+                        ?.shortLabel || "Narrative"}
+                    </span>
+                    <span aria-hidden="true"> · </span>
                     <span>{activeProject.scenes.length} {activeProject.scenes.length === 1 ? "scene" : "scenes"}</span>
                     <span aria-hidden="true"> · </span>
                     <span className="capitalize">{activeProject.status}</span>
@@ -1101,7 +1281,7 @@ export const MvStudio: React.FC<MvStudioProps> = ({
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 items-end">
-                <div className="sm:col-span-7 space-y-1.5">
+                <div className="sm:col-span-5 space-y-1.5">
                   <label className="block text-xs font-medium text-zinc-400">Visual Concept</label>
                   <input
                     type="text"
@@ -1112,7 +1292,22 @@ export const MvStudio: React.FC<MvStudioProps> = ({
                   />
                 </div>
 
-                <div className="sm:col-span-5 space-y-1.5">
+                <div className="sm:col-span-4 space-y-1.5">
+                  <label className="block text-xs font-medium text-zinc-400">Music Video Type</label>
+                  <select
+                    value={videoType}
+                    onChange={(e) => setVideoType(normalizeMusicVideoType(e.target.value))}
+                    className="w-full min-h-[44px] px-3.5 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-sm text-zinc-100 focus:outline-none focus:border-amber-500"
+                  >
+                    {MUSIC_VIDEO_TYPES.map((mvType) => (
+                      <option key={mvType.id} value={mvType.id}>
+                        {mvType.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="sm:col-span-3 space-y-1.5">
                   <span className="block text-xs font-medium text-zinc-400">Frame Ratio</span>
                   <div className="grid grid-cols-2 gap-2">
                     {(["16:9", "9:16"] as const).map((ratio) => (
@@ -1211,6 +1406,12 @@ export const MvStudio: React.FC<MvStudioProps> = ({
                         ref={audioRef}
                         controls
                         src={activeProject.audioPath}
+                        onLoadedMetadata={(e) => {
+                          const dur = e.currentTarget.duration;
+                          if (Number.isFinite(dur) && dur > 0) {
+                            setSongDurationSec(Number(dur.toFixed(1)));
+                          }
+                        }}
                         onTimeUpdate={(e) => setPlayheadSec(Number(e.currentTarget.currentTime.toFixed(1)))}
                         className="w-full h-10"
                       />
@@ -1276,17 +1477,63 @@ export const MvStudio: React.FC<MvStudioProps> = ({
 
                 <div className="max-h-64 overflow-y-auto divide-y divide-zinc-800/70 pr-1">
                   {timestampSegments.map((seg, idx) => (
-                    <button
+                    <div
                       key={`${seg.orderIndex}-${idx}`}
-                      type="button"
-                      onClick={() => handleSeekAudio(seg.startSec)}
-                      className="w-full min-h-[48px] px-3 py-2.5 text-left hover:bg-zinc-900/80 transition-colors flex items-baseline gap-4 rounded-lg"
+                      className="w-full min-h-[48px] px-3 py-2 hover:bg-zinc-900/80 transition-colors flex items-center justify-between gap-3 rounded-lg"
                     >
-                      <span className="font-mono text-xs text-amber-400 tabular-nums shrink-0">
-                        {formatTimecode(seg.startSec)} – {formatTimecode(seg.endSec)}
-                      </span>
-                      <span className="text-sm text-zinc-100 leading-snug">{seg.text}</span>
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSeekAudio(seg.startSec)}
+                        className="flex-1 min-w-0 text-left flex items-baseline gap-4 py-0.5"
+                      >
+                        <span className="font-mono text-xs text-amber-400 tabular-nums shrink-0">
+                          {formatTimecode(seg.startSec)} – {formatTimecode(seg.endSec)}
+                        </span>
+                        <span className="text-sm text-zinc-100 leading-snug">{seg.text}</span>
+                      </button>
+
+                      {scopeMode === "section" && (
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const nextStart = Number(seg.startSec.toFixed(1));
+                              setSectionStartSec(nextStart);
+                              if (sectionEndSec <= nextStart + 2) {
+                                const fallbackEnd = Number((nextStart + 30).toFixed(1));
+                                setSectionEndSec(
+                                  effectiveDurationSec ? Math.min(effectiveDurationSec, fallbackEnd) : fallbackEnd
+                                );
+                              }
+                            }}
+                            className={`min-h-[36px] px-2.5 rounded-lg border text-xs font-mono transition-colors ${
+                              Math.abs(sectionStartSec - seg.startSec) < 0.2
+                                ? "bg-amber-500 text-zinc-950 border-amber-500 font-semibold"
+                                : "bg-zinc-950 text-zinc-300 border-zinc-800 hover:border-amber-500"
+                            }`}
+                          >
+                            Start
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const nextEnd = Number(seg.endSec.toFixed(1));
+                              setSectionEndSec(nextEnd);
+                              if (nextEnd <= sectionStartSec) {
+                                setSectionStartSec(Math.max(0, Number((nextEnd - 15).toFixed(1))));
+                              }
+                            }}
+                            className={`min-h-[36px] px-2.5 rounded-lg border text-xs font-mono transition-colors ${
+                              Math.abs(clampedSectionEndSec - seg.endSec) < 0.2
+                                ? "bg-amber-500 text-zinc-950 border-amber-500 font-semibold"
+                                : "bg-zinc-950 text-zinc-300 border-zinc-800 hover:border-amber-500"
+                            }`}
+                          >
+                            End
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   ))}
                 </div>
               </section>
@@ -1302,7 +1549,7 @@ export const MvStudio: React.FC<MvStudioProps> = ({
                     <span>AI Director &amp; Lyrics</span>
                   </h2>
                   <p className="text-sm text-zinc-400">
-                    GPT-4o breaks the song into gapless 4.0–5.5s shots alternating Wide, Close-Up, Low Angle, and Tracking with separated image and motion prompts.
+                    Choose your music video style and whether to direct the full song or a custom timestamp section.
                   </p>
                 </div>
 
@@ -1310,6 +1557,188 @@ export const MvStudio: React.FC<MvStudioProps> = ({
                   <span className="text-xs text-amber-300/90 shrink-0">
                     Add <span className="font-mono">OPENAI_API_KEY</span> in Secrets for GPT-4o
                   </span>
+                )}
+              </div>
+
+              {/* Music Video Type Selector */}
+              <div className="space-y-2">
+                <span className="block text-xs font-medium text-zinc-300">
+                  1. Music Video Type
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
+                  {MUSIC_VIDEO_TYPES.map((mvType) => {
+                    const active = videoType === mvType.id;
+                    return (
+                      <button
+                        key={mvType.id}
+                        type="button"
+                        onClick={() => setVideoType(mvType.id)}
+                        className={`min-h-[74px] p-3 rounded-xl border text-left transition-colors flex flex-col justify-between gap-1 ${
+                          active
+                            ? "bg-amber-500/15 border-amber-500 text-amber-100"
+                            : "bg-zinc-950 border-zinc-800 text-zinc-300 hover:border-zinc-700"
+                        }`}
+                      >
+                        <div>
+                          <p className="text-sm font-semibold leading-tight">{mvType.shortLabel}</p>
+                          <p className="text-[11px] font-mono text-amber-400/90 mt-0.5">{mvType.mixNote}</p>
+                        </div>
+                        <p className="text-xs text-zinc-400 leading-snug">{mvType.desc}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Song Coverage: Full Song vs Choose Section */}
+              <div className="rounded-xl bg-zinc-950 border border-zinc-800/90 p-4 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div>
+                    <span className="block text-xs font-medium text-zinc-200">
+                      2. Song Coverage
+                    </span>
+                    <p className="text-xs text-zinc-400 mt-0.5 tabular-nums">
+                      {effectiveDurationSec
+                        ? `Track length ${formatTimecode(effectiveDurationSec)}`
+                        : "Upload audio in Step 01 to auto-detect full track length"}
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 sm:w-72">
+                    {(
+                      [
+                        { id: "full", label: "Full Song" },
+                        { id: "section", label: "Choose Section" },
+                      ] as const
+                    ).map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => setScopeMode(opt.id)}
+                        className={`min-h-[44px] px-3 rounded-xl border text-sm font-medium transition-colors ${
+                          scopeMode === opt.id
+                            ? "bg-amber-500 text-zinc-950 border-amber-500 font-semibold"
+                            : "bg-zinc-900 text-zinc-300 border-zinc-800 hover:border-zinc-700"
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {scopeMode === "section" && (
+                  <div className="space-y-3 pt-3 border-t border-zinc-800/80">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <label className="block text-xs font-medium text-zinc-400">
+                          Section Start (seconds)
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            step="0.5"
+                            min={0}
+                            max={effectiveDurationSec ? Math.max(0, effectiveDurationSec - 4) : undefined}
+                            value={sectionStartSec}
+                            onChange={(e) => {
+                              const val = Math.max(0, Number(e.target.value) || 0);
+                              setSectionStartSec(val);
+                              if (sectionEndSec <= val + 4) {
+                                setSectionEndSec(Number((val + 15).toFixed(1)));
+                              }
+                            }}
+                            className="w-full min-h-[44px] px-3.5 py-2 rounded-xl bg-zinc-900 border border-zinc-800 text-sm font-mono text-zinc-100 tabular-nums focus:outline-none focus:border-amber-500"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const nextStart = Number(playheadSec.toFixed(1));
+                              setSectionStartSec(nextStart);
+                              if (sectionEndSec <= nextStart + 4) {
+                                setSectionEndSec(Number((nextStart + 30).toFixed(1)));
+                              }
+                            }}
+                            className="min-h-[44px] px-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700/80 text-xs font-medium text-zinc-200 whitespace-nowrap"
+                          >
+                            Use Playhead
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="block text-xs font-medium text-zinc-400">
+                          Section End (seconds)
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            step="0.5"
+                            min={sectionStartSec + 4}
+                            max={effectiveDurationSec ?? undefined}
+                            value={clampedSectionEndSec}
+                            onChange={(e) => {
+                              const val = Math.max(sectionStartSec + 4, Number(e.target.value) || sectionStartSec + 4);
+                              setSectionEndSec(val);
+                            }}
+                            className="w-full min-h-[44px] px-3.5 py-2 rounded-xl bg-zinc-900 border border-zinc-800 text-sm font-mono text-zinc-100 tabular-nums focus:outline-none focus:border-amber-500"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const nextEnd = Math.max(sectionStartSec + 4, Number(playheadSec.toFixed(1)));
+                              setSectionEndSec(nextEnd);
+                            }}
+                            className="min-h-[44px] px-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700/80 text-xs font-medium text-zinc-200 whitespace-nowrap"
+                          >
+                            Use Playhead
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs text-zinc-400 mr-1">Quick ranges:</span>
+                      <button
+                        type="button"
+                        onClick={() => applySectionWindow(0, 30)}
+                        className="min-h-[38px] px-3 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-xs text-zinc-200"
+                      >
+                        0s–30s Intro
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => applySectionWindow(playheadSec, 15)}
+                        className="min-h-[38px] px-3 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-xs text-zinc-200"
+                      >
+                        15s from Playhead
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => applySectionWindow(playheadSec, 30)}
+                        className="min-h-[38px] px-3 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-xs text-zinc-200"
+                      >
+                        30s from Playhead
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => applySectionWindow(playheadSec, 45)}
+                        className="min-h-[38px] px-3 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-xs text-zinc-200"
+                      >
+                        45s from Playhead
+                      </button>
+                    </div>
+
+                    <p className="text-xs text-amber-300/90 font-mono tabular-nums">
+                      Section {formatTimecode(sectionStartSec)} – {formatTimecode(clampedSectionEndSec)}
+                      <span aria-hidden="true"> · </span>
+                      {(clampedSectionEndSec - sectionStartSec).toFixed(1)}s
+                      <span aria-hidden="true"> · </span>
+                      ~{Math.max(1, Math.round((clampedSectionEndSec - sectionStartSec) / 4.5))} shots
+                      <span aria-hidden="true"> · </span>
+                      Audio syncs at {formatTimecode(sectionStartSec)}
+                    </p>
+                  </div>
                 )}
               </div>
 
@@ -1342,7 +1771,11 @@ export const MvStudio: React.FC<MvStudioProps> = ({
                   ) : (
                     <>
                       <Wand2 className="w-5 h-5" />
-                      <span>Generate Storyboard</span>
+                      <span>
+                        {scopeMode === "section"
+                          ? "Generate Section Storyboard"
+                          : "Generate Full Storyboard"}
+                      </span>
                     </>
                   )}
                 </button>
@@ -1704,6 +2137,15 @@ export const MvStudio: React.FC<MvStudioProps> = ({
                   {activeProject.scenes.filter((s) => s.shotType === "lipsync").length} lipsync (sync-lipsync)
                   <span aria-hidden="true"> · </span>
                   {activeProject.scenes.filter((s) => s.shotType !== "lipsync").length} b-roll
+                  {activeProject.scenes.length > 0 && (
+                    <>
+                      <span aria-hidden="true"> · </span>
+                      <span className="font-mono text-amber-300/90">
+                        {formatTimecode(activeProject.scenes[0].startSec)} –{" "}
+                        {formatTimecode(activeProject.scenes[activeProject.scenes.length - 1].endSec)}
+                      </span>
+                    </>
+                  )}
                 </p>
               </div>
               <span className="text-xs text-zinc-400 font-mono shrink-0">5 parallel workers</span>

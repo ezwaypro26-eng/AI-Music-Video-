@@ -27,11 +27,21 @@ export interface Scene {
   updatedAt: string;
 }
 
+export type MusicVideoType =
+  | "narrative"
+  | "performance"
+  | "visualizer"
+  | "hype"
+  | "retro";
+
+export type SongScopeMode = "full" | "section";
+
 export interface Project {
   id: string;
   title: string;
   concept: string;
   aspectRatio: "16:9" | "9:16" | "1:1" | string;
+  videoType?: MusicVideoType | string;
   rawLyrics: string;
   lyricsJson: string;
   audioPath: string | null;

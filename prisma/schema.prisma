@@ -22,6 +22,7 @@ model Project {
   title          String
   concept        String     @default("")
   aspectRatio    String     @default("16:9")
+  videoType      String     @default("narrative")
   rawLyrics      String     @default("")
   lyricsJson     String     @default("[]")
   audioPath      String?
