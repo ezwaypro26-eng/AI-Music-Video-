@@ -1,0 +1,6 @@
+{
+  "name": "Nocturne MV Studio",
+  "description": "Personal iPad-friendly AI Music Video Studio with Artist Locker, storyboarded scene timeline, and FFmpeg video assembly.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
