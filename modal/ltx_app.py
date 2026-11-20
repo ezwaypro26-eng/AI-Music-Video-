@@ -19,6 +19,7 @@ image = (
     .apt_install("ffmpeg")
     .pip_install(
         "fastapi",
+        "torch",
         "pillow",
         "numpy",
         "transformers",
