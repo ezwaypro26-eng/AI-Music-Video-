@@ -16,6 +16,18 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install app dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check TypeScript
+        run: bun run lint
+
+      - name: Build the existing app
+        run: bun run build
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
