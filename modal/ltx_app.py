@@ -63,6 +63,7 @@ def _load_pipeline():
 @app.function(
     image=image,
     gpu="A100-80GB",
+    memory=131072,
     timeout=3600,
     startup_timeout=1800,
     scaledown_window=60,
