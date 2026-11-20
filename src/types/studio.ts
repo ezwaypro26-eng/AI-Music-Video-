@@ -62,8 +62,6 @@ export interface Capabilities {
   ffmpegAvailable: boolean;
 }
 
-export type RenderQualityMode = "budget" | "turbo" | "master";
-
 export interface RenderJobSceneStatus {
   orderIndex: number;
   shotType: string;
@@ -74,7 +72,6 @@ export interface RenderJobSceneStatus {
 export interface RenderJob {
   projectId: string;
   status: "running" | "completed" | "failed";
-  qualityMode?: RenderQualityMode;
   totalScenes: number;
   completedScenes: number;
   currentSceneIndex: number | null;
