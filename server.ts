@@ -220,7 +220,7 @@ async function generateImageWithModalFlux(params: {
   const { width, height } = getDimensionsForAspectRatio(params.aspectRatio);
   let referenceImageBase64: string | undefined;
   if (params.referenceImagePath) {
-    const fullPath = path.join(PUBLIC_DIR, params.referenceImagePath.replace(/^\\/+/, ""));
+    const fullPath = path.join(PUBLIC_DIR, params.referenceImagePath.replace(/^\/+/, ""));
     if (!fs.existsSync(fullPath)) throw new Error("The artist reference portrait could not be found.");
     referenceImageBase64 = fs.readFileSync(fullPath).toString("base64");
   }
