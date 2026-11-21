@@ -83,12 +83,14 @@ def generate_video(image_b64: str, prompt: str, aspect_ratio: str = "16:9", seed
     raw = base64.b64decode(image_b64)
     source_image = Image.open(io.BytesIO(raw)).convert("RGB")
 
+    # LTX-2.5 requires dimensions divisible by 32. These preserve the
+    # requested aspect ratios before the app's final 1080p FFmpeg scaling.
     if aspect_ratio == "9:16":
-        width, height = 512, 768
+        width, height = 544, 960
     elif aspect_ratio == "1:1":
         width, height = 512, 512
     else:
-        width, height = 768, 512
+        width, height = 960, 544
 
     pipe = _load_pipeline()
     video, _audio = pipe(
