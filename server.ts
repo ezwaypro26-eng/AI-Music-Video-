@@ -308,6 +308,15 @@ async function generateSceneKeyframeWithFlux(params: {
   });
 }
 
+async function uploadLocalFileToFal(absPath: string, mimeType: string): Promise<string> {
+  if (!fs.existsSync(absPath)) {
+    throw new Error(`Missing local asset for Fal upload: ${path.basename(absPath)}`);
+  }
+  const buffer = fs.readFileSync(absPath);
+  const fileObj = new File([buffer], path.basename(absPath), { type: mimeType });
+  return await fal.storage.upload(fileObj);
+}
+
 async function downloadRemoteFile(url: string, targetAbsPath: string): Promise<void> {
   const resp = await fetch(url);
   if (!resp.ok) {
