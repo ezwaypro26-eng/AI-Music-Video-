@@ -1,6 +1,6 @@
 # AI Music Creator
 
-This repository contains the existing AI music-video app. The goal of the provider migration is to keep the current screens, scene workflow, inputs, outputs, and FFmpeg assembly unchanged while moving model execution away from Fal where replacements are ready.
+This repository contains the existing AI music-video app. The goal of the provider migration is to keep the current screens, scene workflow, inputs, outputs, and FFmpeg assembly unchanged while moving model execution to Hugging Face models hosted on Modal.
 
 ## Model and provider map
 
@@ -11,10 +11,10 @@ This repository contains the existing AI music-video app. The goal of the provid
 | Song transcription and timestamped lyrics | Hugging Face `openai/whisper-large-v3`, hosted on Modal | Modal service code exists in `modal/whisper_app.py`; deployment and live test must be confirmed. |
 | Vocal separation | Demucs v4 `htdemucs`, hosted on Modal | Modal service code exists in `modal/demucs_app.py`; deployment and live test must be confirmed. |
 | B-roll image-to-video | Hugging Face `Lightricks/LTX-2.5-Diffusers`, hosted on Modal | Modal service code exists in `modal/ltx_app.py`; deployment and live test must be confirmed. |
-| Lip-sync | Hugging Face lip-sync model hosted on Modal | Target provider is Hugging Face/Modal. The model has not yet been selected or integrated. The current server code still calls `fal-ai/sync-lipsync`; keep `FAL_KEY` until that replacement is implemented and tested. |
+| Lip-sync | MuseTalk 1.5 from Hugging Face, hosted on Modal | Modal service code is in `modal/musetalk_app.py`; the server render route now calls this service. Deployment and a real lip-sync render still need to be tested. |
 | Storyboard / AI Director | OpenAI `gpt-4o` and Gemini | Existing integrations; not part of this Modal deployment workflow. |
 
-**Important:** A model file existing in the repository does not mean its Modal service is deployed or working. Confirm each deployment and run an actual app test before treating it as live. The lip-sync migration is not included in the commands below yet.
+**Important:** A model file existing in the repository does not mean its Modal service is deployed or working. Confirm each deployment and run an actual app test before treating it as live. The lip-sync service is included in the terminal deployment command below, but a successful deploy and real render are still required.
 
 ## Modal secret setup
 
@@ -34,24 +34,24 @@ These are Modal deployment credentials, not the Hugging Face token and not `APP_
 
 ## Deploy from Terminal (Mac)
 
-Run these commands from the repository's root folder. The first-time setup creates a Python environment and signs the Modal CLI into your Modal account:
+Run these commands from the repository's root folder. This uses your existing Modal CLI login; do not run `modal setup` again.
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip modal fastapi
-modal setup
 ```
 
-Check the Modal Python files, then deploy the four services currently included in the repository:
+Check the Modal Python files, then deploy the services. Deploy MuseTalk after the other four services:
 
 ```bash
-python -m py_compile modal/demucs_app.py modal/whisper_app.py modal/ltx_app.py modal/flux_image_app.py
+python -m py_compile modal/demucs_app.py modal/whisper_app.py modal/ltx_app.py modal/flux_image_app.py modal/musetalk_app.py
 
 modal deploy modal/demucs_app.py
 modal deploy modal/whisper_app.py
 modal deploy modal/ltx_app.py
 modal deploy modal/flux_image_app.py
+modal deploy modal/musetalk_app.py
 ```
 
 Each `modal deploy` command prints the deployed web endpoint. Copy each URL from the successful deployment output. The first model request may take longer because the GPU container downloads model weights into its persistent Modal Volume.
@@ -88,8 +88,10 @@ Add these variables to the app host's environment settings (for example, the app
 | `MODAL_LTX_API_TOKEN` | Modal `APP_API_TOKEN` |
 | `MODAL_FLUX_URL` | Deployed FLUX web URL |
 | `MODAL_FLUX_API_TOKEN` | Modal `APP_API_TOKEN` |
+| `MODAL_LIPSYNC_URL` | Deployed MuseTalk web URL |
+| `MODAL_LIPSYNC_API_TOKEN` | Modal `APP_API_TOKEN` |
 
-Keep `FAL_KEY` in the app environment for now: the current lip-sync code still calls Fal. Remove it only after the Hugging Face/Modal lip-sync replacement has been implemented, connected, and successfully tested. Save the environment changes and redeploy/restart the app host so the server receives the new values.
+Add `MODAL_LIPSYNC_URL` using the web URL printed by the MuseTalk deployment and `MODAL_LIPSYNC_API_TOKEN` using the same `APP_API_TOKEN` stored in the Modal `huggingface-secret`. The server no longer reads a legacy lip-sync provider key. Save the environment changes and redeploy/restart the app host so the server receives the new values. Run a real lip-sync render before considering the migration complete.
 
 ## Cost and runtime notes
 
