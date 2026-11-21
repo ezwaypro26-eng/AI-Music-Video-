@@ -192,28 +192,123 @@ async function downloadImageToPublic(imageUrl: string, destDir: string, prefix: 
   return `/${relFromPublic}`;
 }
 
-function mapAspectRatioToFalSize(aspectRatio: string): "landscape_16_9" | "portrait_16_9" | "square_hd" {
-  if (aspectRatio === "9:16") return "portrait_16_9";
-  if (aspectRatio === "1:1") return "square_hd";
-  return "landscape_16_9";
+function getModalFluxConfig(): { url: string; token: string } | null {
+  const url = process.env.MODAL_FLUX_URL?.trim().replace(/\/+$/, "");
+  const token = process.env.MODAL_FLUX_API_TOKEN?.trim();
+  if (!url || !token) return null;
+  return { url, token };
 }
 
 function getDimensionsForAspectRatio(aspectRatio: string): { width: number; height: number } {
-  if (aspectRatio === "9:16") return { width: 1080, height: 1920 };
-  if (aspectRatio === "1:1") return { width: 1080, height: 1080 };
-  return { width: 1920, height: 1080 };
+  if (aspectRatio === "9:16") return { width: 768, height: 1360 };
+  if (aspectRatio === "1:1") return { width: 1024, height: 1024 };
+  return { width: 1360, height: 768 };
 }
 
-async function uploadLocalFileToFal(absPath: string, mimeType: string): Promise<string> {
-  if (!fs.existsSync(absPath)) {
-    throw new Error(`Missing local asset for Fal upload: ${path.basename(absPath)}`);
+async function generateImageWithModalFlux(params: {
+  model: "flux-dev" | "flux-kontext";
+  prompt: string;
+  aspectRatio: string;
+  referenceImagePath?: string | null;
+  targetAbsPath: string;
+}): Promise<void> {
+  const config = getModalFluxConfig();
+  if (!config) {
+    throw new Error("Hugging Face FLUX is not connected yet. Add MODAL_FLUX_URL and MODAL_FLUX_API_TOKEN to the app environment settings after deploying the Modal FLUX service.");
   }
-  const buffer = fs.readFileSync(absPath);
-  const fileObj = new File([buffer], path.basename(absPath), { type: mimeType });
-  return await fal.storage.upload(fileObj);
+
+  const { width, height } = getDimensionsForAspectRatio(params.aspectRatio);
+  let referenceImageBase64: string | undefined;
+  if (params.referenceImagePath) {
+    const fullPath = path.join(PUBLIC_DIR, params.referenceImagePath.replace(/^\\/+/, ""));
+    if (!fs.existsSync(fullPath)) throw new Error("The artist reference portrait could not be found.");
+    referenceImageBase64 = fs.readFileSync(fullPath).toString("base64");
+  }
+
+  const response = await fetch(`${config.url}/generate`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${config.token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: params.model,
+      prompt: params.prompt,
+      width,
+      height,
+      reference_image_base64: referenceImageBase64,
+    }),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Modal FLUX image generation failed (${response.status}): ${detail.slice(0, 600)}`);
+  }
+
+  const imageBytes = Buffer.from(await response.arrayBuffer());
+  if (imageBytes.length < 1024) throw new Error("Modal FLUX returned an empty or incomplete image.");
+  fs.mkdirSync(path.dirname(params.targetAbsPath), { recursive: true });
+  fs.writeFileSync(params.targetAbsPath, imageBytes);
 }
 
-async function downloadRemoteFile(url: string, targetAbsPath: string): Promise<void> {
+async function saveScenePngFromModalFlux(params: {
+  projectId: string;
+  orderIndex: number;
+  prompt: string;
+  aspectRatio: string;
+  referenceImagePath?: string | null;
+  model: "flux-dev" | "flux-kontext";
+}): Promise<string> {
+  const projectDir = path.join(PROJECTS_DIR, params.projectId);
+  fs.mkdirSync(projectDir, { recursive: true });
+  const targetPngPath = path.join(projectDir, `scene_${params.orderIndex}.png`);
+  await generateImageWithModalFlux({
+    model: params.model,
+    prompt: params.prompt,
+    aspectRatio: params.aspectRatio,
+    referenceImagePath: params.referenceImagePath,
+    targetAbsPath: targetPngPath,
+  });
+  return `/projects/${params.projectId}/scene_${params.orderIndex}.png`;
+}
+
+async function generateSceneKeyframeWithFlux(params: {
+  projectId: string;
+  orderIndex: number;
+  aspectRatio: string;
+  imagePrompt: string;
+  lyricSegment: string;
+  characterName?: string | null;
+  characterVisualPrompt?: string | null;
+  characterRefPath?: string | null;
+}): Promise<string> {
+  const baseDesc = params.imagePrompt.trim() || params.lyricSegment.trim() || "Atmospheric music video scene";
+
+  if (params.characterRefPath) {
+    const identityLine = params.characterName
+      ? `Preserve ${params.characterName}'s identity, face, hair, and outfit from the supplied reference image (${params.characterVisualPrompt || "singer portrait"}).`
+      : "Preserve the singer's exact identity, face, hair, and outfit from the supplied reference image.";
+    return saveScenePngFromModalFlux({
+      projectId: params.projectId,
+      orderIndex: params.orderIndex,
+      aspectRatio: params.aspectRatio,
+      prompt: `${identityLine} ${baseDesc} 35mm cinematic music video still.`,
+      referenceImagePath: params.characterRefPath,
+      model: "flux-kontext",
+    });
+  }
+
+  const fallbackPrompt = `${params.characterVisualPrompt ? `${params.characterVisualPrompt}. ` : ""}${baseDesc}, 35mm cinematic music video still.`;
+  return saveScenePngFromModalFlux({
+    projectId: params.projectId,
+    orderIndex: params.orderIndex,
+    aspectRatio: params.aspectRatio,
+    prompt: fallbackPrompt,
+    model: "flux-dev",
+  });
+}
+
+async function downloadRemoteFileasync function downloadRemoteFile(url: string, targetAbsPath: string): Promise<void> {
   const resp = await fetch(url);
   if (!resp.ok) {
     throw new Error(`Failed to download remote media (${resp.status})`);
@@ -243,104 +338,7 @@ async function getAudioDurationSec(publicRelPath: string | null | undefined): Pr
   }
 }
 
-async function uploadPublicImageToFal(publicRelPath: string | null | undefined): Promise<string | null> {
-  if (!publicRelPath) return null;
-  const fullPath = path.join(PUBLIC_DIR, publicRelPath.replace(/^\/+/, ""));
-  if (!fs.existsSync(fullPath)) return null;
-  const ext = path.extname(fullPath).toLowerCase();
-  const mime = ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp" : "image/jpeg";
-  const buffer = fs.readFileSync(fullPath);
-  const fileObj = new File([buffer], path.basename(fullPath), { type: mime });
-  return await fal.storage.upload(fileObj);
-}
-
-async function saveScenePngFromUrl(imageUrl: string, projectId: string, orderIndex: number): Promise<string> {
-  const response = await fetch(imageUrl);
-  if (!response.ok) {
-    throw new Error(`Failed to download generated keyframe (${response.status})`);
-  }
-  const projectDir = path.join(PROJECTS_DIR, projectId);
-  fs.mkdirSync(projectDir, { recursive: true });
-  const targetPngPath = path.join(projectDir, `scene_${orderIndex}.png`);
-  const contentType = response.headers.get("content-type") || "";
-  const buffer = Buffer.from(await response.arrayBuffer());
-
-  if (contentType.includes("png") || imageUrl.toLowerCase().includes(".png")) {
-    fs.writeFileSync(targetPngPath, buffer);
-  } else {
-    const tmpFile = path.join(projectDir, `tmp_${orderIndex}_${Date.now()}`);
-    fs.writeFileSync(tmpFile, buffer);
-    await execFileAsync("ffmpeg", ["-y", "-i", tmpFile, targetPngPath]);
-    if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
-  }
-
-  return `/projects/${projectId}/scene_${orderIndex}.png`;
-}
-
-async function generateSceneKeyframeWithFal(params: {
-  projectId: string;
-  orderIndex: number;
-  aspectRatio: string;
-  imagePrompt: string;
-  lyricSegment: string;
-  characterName?: string | null;
-  characterVisualPrompt?: string | null;
-  characterRefUrl?: string | null;
-}): Promise<string> {
-  const {
-    projectId,
-    orderIndex,
-    aspectRatio,
-    imagePrompt,
-    lyricSegment,
-    characterName,
-    characterVisualPrompt,
-    characterRefUrl,
-  } = params;
-
-  const baseDesc = imagePrompt.trim() || lyricSegment.trim() || "Atmospheric music video scene";
-
-  if (characterRefUrl) {
-    const identityLine = characterName
-      ? `Keep ${characterName}'s exact face, hair, and outfit consistent with the reference image (${characterVisualPrompt || "singer portrait"}).`
-      : `Keep the singer's exact face and outfit identical to the reference image.`;
-    const kontextPrompt = `${identityLine} ${baseDesc} 35mm cinema film still.`;
-
-    const result = await fal.subscribe("fal-ai/flux-pro/kontext", {
-      input: {
-        prompt: kontextPrompt,
-        image_url: characterRefUrl,
-        aspect_ratio: aspectRatio === "9:16" ? "9:16" : aspectRatio === "1:1" ? "1:1" : "16:9",
-        output_format: "png",
-      },
-    });
-
-    const imageUrl = (result.data as { images?: Array<{ url?: string }> })?.images?.[0]?.url;
-    if (!imageUrl) {
-      throw new Error("fal-ai/flux-pro/kontext did not return an image URL.");
-    }
-    return await saveScenePngFromUrl(imageUrl, projectId, orderIndex);
-  }
-
-  const fallbackPrompt = `${characterVisualPrompt ? `${characterVisualPrompt}. ` : ""}${baseDesc}, 35mm cinema film still.`;
-  const result = await fal.subscribe("fal-ai/flux-pro/v1.1", {
-    input: {
-      prompt: fallbackPrompt,
-      image_size: mapAspectRatioToFalSize(aspectRatio),
-      num_images: 1,
-      output_format: "png",
-      safety_tolerance: "2",
-    },
-  });
-
-  const imageUrl = (result.data as { images?: Array<{ url?: string }> })?.images?.[0]?.url;
-  if (!imageUrl) {
-    throw new Error("fal-ai/flux-pro/v1.1 did not return an image URL.");
-  }
-  return await saveScenePngFromUrl(imageUrl, projectId, orderIndex);
-}
-
-// ---------- Health & Capabilities ----------
+// ---------- Health & Capabilities ----------// ---------- Health & Capabilities ----------
 app.get("/api/capabilities", async (_req: Request, res: Response) => {
   let hasFfmpeg = false;
   try {
@@ -352,6 +350,7 @@ app.get("/api/capabilities", async (_req: Request, res: Response) => {
   res.json({
     falConfigured: Boolean(getFalKey()),
     modalVideoConfigured: Boolean(getModalLtxConfig()),
+    modalFluxConfigured: Boolean(getModalFluxConfig()),
     geminiConfigured: Boolean(getGeminiKey()),
     openaiConfigured: Boolean(getOpenAiKey()),
     ffmpegAvailable: hasFfmpeg,
@@ -415,35 +414,16 @@ app.post("/api/characters/generate", async (req: Request, res: Response) => {
       return;
     }
 
-    const falKey = getFalKey();
-    if (!falKey) {
-      res.status(400).json({
-        error: "FAL_KEY is not configured. Add FAL_KEY in Secrets to generate portraits via fal-ai/flux-pro/v1.1, or switch to Upload Photo.",
-      });
-      return;
-    }
-
-    fal.config({ credentials: falKey });
-
     const studioPrompt = `${visualPrompt}, editorial singer portrait photography, dramatic studio lighting, crisp facial detail, 85mm prime lens, shallow depth of field`;
-
-    const result = await fal.subscribe("fal-ai/flux-pro/v1.1", {
-      input: {
-        prompt: studioPrompt,
-        image_size: "portrait_4_3",
-        num_images: 1,
-        output_format: "jpeg",
-        safety_tolerance: "2",
-      },
+    const filename = `char-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
+    const targetAbsPath = path.join(CHARACTERS_DIR, filename);
+    await generateImageWithModalFlux({
+      model: "flux-dev",
+      prompt: studioPrompt,
+      aspectRatio: "3:4",
+      targetAbsPath,
     });
-
-    const imageUrl = (result.data as { images?: Array<{ url?: string }> })?.images?.[0]?.url;
-    if (!imageUrl) {
-      res.status(502).json({ error: "fal-ai/flux-pro/v1.1 did not return an image URL." });
-      return;
-    }
-
-    const refImagePath = await downloadImageToPublic(imageUrl, CHARACTERS_DIR, "char");
+    const refImagePath = `/characters/${filename}`;
 
     const character = await prisma.character.create({
       data: {
@@ -1524,30 +1504,14 @@ app.post("/api/scenes/:id/generate-image", async (req: Request, res: Response) =
     const id = String(req.params.id);
     const scene = await prisma.scene.findUnique({
       where: { id },
-      include: {
-        project: { include: { character: true } },
-      },
+      include: { project: { include: { character: true } } },
     });
     if (!scene) {
       res.status(404).json({ error: "Scene not found." });
       return;
     }
 
-    const falKey = getFalKey();
-    if (!falKey) {
-      res.status(400).json({
-        error: "FAL_KEY is not configured. Add FAL_KEY in Secrets to generate scene frames via fal-ai/flux-pro/kontext, or upload an image frame manually.",
-      });
-      return;
-    }
-
-    fal.config({ credentials: falKey });
-
-    const characterRefUrl = scene.project.character?.refImagePath
-      ? await uploadPublicImageToFal(scene.project.character.refImagePath)
-      : null;
-
-    const imagePath = await generateSceneKeyframeWithFal({
+    const imagePath = await generateSceneKeyframeWithFlux({
       projectId: scene.projectId,
       orderIndex: scene.orderIndex,
       aspectRatio: scene.project.aspectRatio,
@@ -1555,17 +1519,13 @@ app.post("/api/scenes/:id/generate-image", async (req: Request, res: Response) =
       lyricSegment: scene.lyricSegment,
       characterName: scene.project.character?.name,
       characterVisualPrompt: scene.project.character?.visualPrompt,
-      characterRefUrl,
+      characterRefPath: scene.project.character?.refImagePath,
     });
 
     const updated = await prisma.scene.update({
       where: { id },
-      data: {
-        imagePath,
-        status: "ready",
-      },
+      data: { imagePath, status: "ready" },
     });
-
     res.json({ scene: updated });
   } catch (err) {
     console.error("POST /api/scenes/:id/generate-image failed:", err);
