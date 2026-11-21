@@ -1303,14 +1303,6 @@ app.post("/api/projects/:id/generate-keyframes", async (req: Request, res: Respo
   const id = String(req.params.id);
 
   try {
-    const falKey = getFalKey();
-    if (!falKey) {
-      res.status(400).json({
-        error: "FAL_KEY is not configured. Add FAL_KEY in Secrets to generate keyframes via fal-ai/flux-pro/kontext.",
-      });
-      return;
-    }
-
     const project = await prisma.project.findUnique({
       where: { id },
       include: {
@@ -1327,19 +1319,13 @@ app.post("/api/projects/:id/generate-keyframes", async (req: Request, res: Respo
       return;
     }
 
-    fal.config({ credentials: falKey });
-
-    const characterRefUrl = project.character?.refImagePath
-      ? await uploadPublicImageToFal(project.character.refImagePath)
-      : null;
-
-    // Process in batches of 3 in parallel for fast execution without rate-limit spikes
+    // Keep the existing bulk-keyframe workflow; FLUX runs through Modal instead of fal.ai.
     const batchSize = 3;
     for (let i = 0; i < project.scenes.length; i += batchSize) {
       const batch = project.scenes.slice(i, i + batchSize);
       await Promise.all(
         batch.map(async (scene) => {
-          const imagePath = await generateSceneKeyframeWithFal({
+          const imagePath = await generateSceneKeyframeWithFlux({
             projectId: project.id,
             orderIndex: scene.orderIndex,
             aspectRatio: project.aspectRatio,
@@ -1347,14 +1333,11 @@ app.post("/api/projects/:id/generate-keyframes", async (req: Request, res: Respo
             lyricSegment: scene.lyricSegment,
             characterName: project.character?.name,
             characterVisualPrompt: project.character?.visualPrompt,
-            characterRefUrl,
+            characterRefPath: project.character?.refImagePath,
           });
           await prisma.scene.update({
             where: { id: scene.id },
-            data: {
-              imagePath,
-              status: "ready",
-            },
+            data: { imagePath, status: "ready" },
           });
         })
       );
@@ -1368,7 +1351,6 @@ app.post("/api/projects/:id/generate-keyframes", async (req: Request, res: Respo
         scenes: { orderBy: { orderIndex: "asc" } },
       },
     });
-
     res.json({ project: updated });
   } catch (err) {
     console.error("POST /api/projects/:id/generate-keyframes failed:", err);
