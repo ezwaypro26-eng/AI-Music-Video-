@@ -18,7 +18,7 @@ hf_secret = modal.Secret.from_name("huggingface-secret")
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
-    .apt_install("ffmpeg")
+    .apt_install("ffmpeg", "git")
     .pip_install(
         "fastapi",
         "torch",
