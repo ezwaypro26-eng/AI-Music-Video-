@@ -193,7 +193,7 @@ async function downloadImageToPublic(imageUrl: string, destDir: string, prefix: 
 }
 
 function getModalWhisperConfig(): { url: string; token: string } | null {
-  const url = process.env.MODAL_WHISPER_URL?.trim().replace(/\\/+$/, "");
+  const url = process.env.MODAL_WHISPER_URL?.trim().replace(/\/+$/, "");
   const token = process.env.MODAL_WHISPER_API_TOKEN?.trim();
   if (!url || !token) return null;
   return { url, token };
