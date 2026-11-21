@@ -56,7 +56,11 @@ export interface Project {
 }
 
 export interface Capabilities {
-  falConfigured: boolean;
+  modalFluxConfigured: boolean;
+  modalWhisperConfigured: boolean;
+  modalDemucsConfigured: boolean;
+  modalLipsyncConfigured: boolean;
+  modalVideoConfigured: boolean;
   geminiConfigured: boolean;
   openaiConfigured: boolean;
   ffmpegAvailable: boolean;
