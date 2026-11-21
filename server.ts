@@ -1601,12 +1601,12 @@ const renderJobs = new Map<string, RenderJob>();
 
 async function runRenderPipeline(
   projectId: string,
-  falKey: string,
+  falKey: string | null,
   job: RenderJob,
   qualityMode: RenderQualityMode = "turbo"
 ): Promise<void> {
   try {
-    fal.config({ credentials: falKey });
+    if (falKey) fal.config({ credentials: falKey });
 
     const project = await prisma.project.findUnique({
       where: { id: projectId },
@@ -1686,6 +1686,9 @@ async function runRenderPipeline(
 
       try {
         if (s.shotType === "lipsync") {
+          if (!falKey) {
+            throw new Error("FAL_KEY is required only for lip-sync shots. Add it to the app's environment settings or change this shot to B-roll.");
+          }
           if (!lipsyncAudioSourceAbs) {
             throw new Error(
               `Shot ${shotNum} is marked 'lipsync', but vocals.wav / song.mp3 was not found.`
@@ -1951,12 +1954,6 @@ app.post("/api/projects/:id/render", async (req: Request, res: Response) => {
     }
 
     const falKey = getFalKey();
-    if (!falKey) {
-      res.status(400).json({
-        error: "FAL_KEY is not configured. Add FAL_KEY in Secrets to run sync-lipsync and Kling v2 Master.",
-      });
-      return;
-    }
 
     const project = await prisma.project.findUnique({
       where: { id },
@@ -1974,6 +1971,12 @@ app.post("/api/projects/:id/render", async (req: Request, res: Response) => {
     if (readyScenes.length === 0) {
       res.status(400).json({
         error: "At least one scene needs a generated or uploaded keyframe image before rendering.",
+      });
+      return;
+    }
+    if (!falKey && readyScenes.some((scene) => scene.shotType === "lipsync")) {
+      res.status(400).json({
+        error: "FAL_KEY is required for lip-sync shots. B-roll-only renders use Modal LTX and do not require Fal.",
       });
       return;
     }
