@@ -200,7 +200,8 @@ function getModalFluxConfig(): { url: string; token: string } | null {
 }
 
 function getDimensionsForAspectRatio(aspectRatio: string): { width: number; height: number } {
-  if (aspectRatio === "9:16" || aspectRatio === "3:4") return { width: 768, height: 1360 };
+  if (aspectRatio === "9:16") return { width: 768, height: 1360 };
+  if (aspectRatio === "3:4") return { width: 1024, height: 1360 };
   if (aspectRatio === "1:1") return { width: 1024, height: 1024 };
   return { width: 1360, height: 768 };
 }
