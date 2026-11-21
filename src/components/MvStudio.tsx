@@ -36,7 +36,7 @@ interface MvStudioProps {
   projects: Project[];
   characters: Character[];
   loading: boolean;
-  falConfigured: boolean;
+  audioModelsConfigured: boolean;
   geminiConfigured: boolean;
   openaiConfigured: boolean;
   activeProjectId: string | null;
@@ -153,7 +153,7 @@ export const MvStudio: React.FC<MvStudioProps> = ({
   projects,
   characters,
   loading,
-  falConfigured,
+  audioModelsConfigured,
   openaiConfigured,
   activeProjectId,
   newProjectOpen,
@@ -453,7 +453,7 @@ export const MvStudio: React.FC<MvStudioProps> = ({
     setStatusNotice(null);
     setAnalyzingAudio(true);
     setProcessingStage(
-      "Saving song.mp3, uploading to Fal storage, and running fal-ai/whisper + fal-ai/demucs in parallel..."
+      "Saving song.mp3, then running Hugging Face Whisper and Demucs on Modal..."
     );
 
     try {
@@ -573,7 +573,7 @@ export const MvStudio: React.FC<MvStudioProps> = ({
     setStatusNotice(null);
     setGeneratingKeyframes(true);
     setProcessingStage(
-      `Generating ${activeProject.scenes.length} consistent keyframes via fal-ai/flux-pro/kontext and saving to public/projects/${activeProject.id}/...`
+      `Generating ${activeProject.scenes.length} consistent keyframes with FLUX Kontext on Modal and saving to public/projects/${activeProject.id}/...`
     );
 
     try {
@@ -887,9 +887,9 @@ export const MvStudio: React.FC<MvStudioProps> = ({
                 Choose your artist, format, concept, Suno lyrics, and upload your track to extract timestamps and vocals.
               </p>
             </div>
-            {!falConfigured && (
+            {!audioModelsConfigured && (
               <span className="text-xs text-amber-300/90">
-                Add <span className="font-mono">FAL_KEY</span> in Secrets to run Whisper &amp; Demucs
+                Connect the Modal Whisper and Demucs services in Render to analyze audio
               </span>
             )}
           </div>
@@ -1432,7 +1432,7 @@ export const MvStudio: React.FC<MvStudioProps> = ({
                       <audio controls src={activeProject.vocalStemPath} className="w-full h-10" />
                     ) : (
                       <p className="text-xs text-zinc-500 py-2">
-                        Generated automatically via <span className="font-mono">fal-ai/demucs</span>.
+                        Generated automatically via Demucs on Modal.
                       </p>
                     )}
                   </div>
@@ -1460,7 +1460,7 @@ export const MvStudio: React.FC<MvStudioProps> = ({
                       Timestamped Lyrics ({timestampSegments.length} segments)
                     </h2>
                     <p className="text-xs sm:text-sm text-zinc-400">
-                      Extracted via <span className="font-mono text-zinc-300">fal-ai/whisper</span>. Tap any line to jump the audio playhead.
+                      Extracted via Hugging Face Whisper on Modal. Tap any line to jump the audio playhead.
                     </p>
                   </div>
 
@@ -1832,7 +1832,7 @@ export const MvStudio: React.FC<MvStudioProps> = ({
                   Storyboard Grid &amp; Keyframes ({activeProject.scenes.length} shots)
                 </h2>
                 <p className="text-xs sm:text-sm text-zinc-400">
-                  Generates character-locked frames via <span className="font-mono text-zinc-300">fal-ai/flux-pro/kontext</span> saved to <span className="font-mono text-zinc-300">public/projects/{activeProject.id}/</span>
+                  Generates character-locked frames via FLUX Kontext on Modal, saved to <span className="font-mono text-zinc-300">public/projects/{activeProject.id}/</span>
                 </p>
               </div>
 
