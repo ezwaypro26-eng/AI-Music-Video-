@@ -19,15 +19,12 @@ service_secret = modal.Secret.from_name("huggingface-secret")
 
 # MuseTalk's published inference stack is pinned to Python 3.10 / CUDA 11.8.
 image = (
-    modal.Image.from_registry(
-        "nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04",
-        add_python="3.10",
-    )
+    modal.Image.debian_slim(python_version="3.10")
     .apt_install("git", "ffmpeg", "build-essential", "libgl1", "libglib2.0-0")
     .pip_install(
-        "torch==2.0.1",
-        "torchvision==0.15.2",
-        "torchaudio==2.0.2",
+        "torch==2.0.1+cu118",
+        "torchvision==0.15.2+cu118",
+        "torchaudio==2.0.2+cu118",
         extra_index_url="https://download.pytorch.org/whl/cu118",
     )
     .run_commands(
