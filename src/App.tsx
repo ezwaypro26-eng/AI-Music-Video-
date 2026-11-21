@@ -11,7 +11,11 @@ export default function App() {
   const [characters, setCharacters] = useState<Character[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [capabilities, setCapabilities] = useState<Capabilities>({
-    falConfigured: true,
+    modalFluxConfigured: true,
+    modalWhisperConfigured: true,
+    modalDemucsConfigured: true,
+    modalLipsyncConfigured: true,
+    modalVideoConfigured: true,
     geminiConfigured: true,
     openaiConfigured: true,
     ffmpegAvailable: true,
@@ -174,7 +178,7 @@ export default function App() {
           <ArtistLocker
             characters={characters}
             loading={loadingCharacters}
-            falConfigured={capabilitiesLoaded ? capabilities.falConfigured : true}
+            fluxConfigured={capabilitiesLoaded ? capabilities.modalFluxConfigured : true}
             composerOpen={lockerComposerOpen}
             onToggleComposer={setLockerComposerOpen}
             onCharacterCreated={handleCharacterCreated}
@@ -186,7 +190,7 @@ export default function App() {
             projects={projects}
             characters={characters}
             loading={loadingProjects}
-            falConfigured={capabilitiesLoaded ? capabilities.falConfigured : true}
+            audioModelsConfigured={capabilitiesLoaded ? capabilities.modalWhisperConfigured && capabilities.modalDemucsConfigured : true}
             geminiConfigured={capabilitiesLoaded ? capabilities.geminiConfigured : true}
             openaiConfigured={capabilitiesLoaded ? capabilities.openaiConfigured : true}
             activeProjectId={activeProjectId}
