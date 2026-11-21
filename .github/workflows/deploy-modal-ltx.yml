@@ -51,7 +51,13 @@ jobs:
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
         run: modal deploy modal/flux_image_app.py
 
-      - name: Deploy Demucs vocal separation service\n        env:\n          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}\n          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}\n        run: modal deploy modal/demucs_app.py\n\n      - name: Print Modal service URLs
+      - name: Deploy Demucs vocal separation service
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: modal deploy modal/demucs_app.py
+
+      - name: Print Modal service URLs
         env:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
@@ -59,7 +65,9 @@ jobs:
           python - <<'PY'
           import modal
           ltx = modal.Function.from_name("ai-music-creater-ltx", "web_app")
-          flux = modal.Function.from_name("ai-music-creater-flux", "web_app")\n          demucs = modal.Function.from_name("ai-music-creater-demucs", "web_app")
+          flux = modal.Function.from_name("ai-music-creater-flux", "web_app")
+          demucs = modal.Function.from_name("ai-music-creater-demucs", "web_app")
           print("MODAL_LTX_URL=" + str(ltx.get_web_url()))
-          print("MODAL_FLUX_URL=" + str(flux.get_web_url()))\n          print("MODAL_DEMUCS_URL=" + str(demucs.get_web_url()))
+          print("MODAL_FLUX_URL=" + str(flux.get_web_url()))
+          print("MODAL_DEMUCS_URL=" + str(demucs.get_web_url()))
           PY
