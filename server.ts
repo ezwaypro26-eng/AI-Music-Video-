@@ -8,7 +8,6 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import multer from "multer";
 import { PrismaClient } from "@prisma/client";
-import { fal } from "@fal-ai/client";
 import { GoogleGenAI } from "@google/genai";
 import OpenAI from "openai";
 
@@ -72,10 +71,43 @@ const uploadAudioTrack = multer({
   limits: { fileSize: 100 * 1024 * 1024 },
 });
 
-function getFalKey(): string | null {
-  const key = (process.env.FAL_KEY || process.env.FAL_API_KEY)?.trim();
-  if (!key || key === "MY_FAL_API_KEY") return null;
-  return key;
+function getModalLipsyncConfig(): { url: string; token: string } | null {
+  const url = process.env.MODAL_LIPSYNC_URL?.trim().replace(/\/+$/, "");
+  const token = process.env.MODAL_LIPSYNC_API_TOKEN?.trim();
+  return url && token ? { url, token } : null;
+}
+
+async function runMuseTalkWithModal(videoPath: string, audioPath: string, outputPath: string, shot: number): Promise<void> {
+  const cfg = getModalLipsyncConfig();
+  if (!cfg) throw new Error("Modal MuseTalk is not connected. Configure MODAL_LIPSYNC_URL and MODAL_LIPSYNC_API_TOKEN in Render.");
+  const submitted = await fetch(`${cfg.url}/submit`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      video_base64: fs.readFileSync(videoPath).toString("base64"),
+      audio_base64: fs.readFileSync(audioPath).toString("base64"),
+    }),
+  });
+  if (!submitted.ok) throw new Error(`MuseTalk submit failed for Shot ${shot}: ${(await submitted.text()).slice(0, 500)}`);
+  const { call_id } = await submitted.json() as { call_id?: string };
+  if (!call_id) throw new Error("MuseTalk did not return a job ID.");
+  const deadline = Date.now() + 30 * 60 * 1000;
+  while (Date.now() < deadline) {
+    const response = await fetch(`${cfg.url}/result/${encodeURIComponent(call_id)}`, {
+      headers: { authorization: `Bearer ${cfg.token}` },
+    });
+    if (!response.ok) throw new Error(`MuseTalk failed for Shot ${shot}: ${(await response.text()).slice(0, 700)}`);
+    if ((response.headers.get("content-type") || "").includes("video/mp4")) {
+      const bytes = Buffer.from(await response.arrayBuffer());
+      if (bytes.length < 1024) throw new Error("MuseTalk returned an empty video.");
+      fs.writeFileSync(outputPath, bytes);
+      return;
+    }
+    const status = await response.json() as { status?: string; detail?: string };
+    if (status.status === "failed") throw new Error(status.detail || "MuseTalk lip-sync failed.");
+    await new Promise(resolve => setTimeout(resolve, 3000));
+  }
+  throw new Error(`MuseTalk timed out for Shot ${shot}.`);
 }
 
 function getModalLtxConfig(): { url: string; token: string } | null {
@@ -414,24 +446,6 @@ async function generateSceneKeyframeWithFlux(params: {
   });
 }
 
-async function uploadLocalFileToFal(absPath: string, mimeType: string): Promise<string> {
-  if (!fs.existsSync(absPath)) {
-    throw new Error(`Missing local asset for Fal upload: ${path.basename(absPath)}`);
-  }
-  const buffer = fs.readFileSync(absPath);
-  const fileObj = new File([buffer], path.basename(absPath), { type: mimeType });
-  return await fal.storage.upload(fileObj);
-}
-
-async function downloadRemoteFile(url: string, targetAbsPath: string): Promise<void> {
-  const resp = await fetch(url);
-  if (!resp.ok) {
-    throw new Error(`Failed to download remote media (${resp.status})`);
-  }
-  const buf = Buffer.from(await resp.arrayBuffer());
-  fs.writeFileSync(targetAbsPath, buf);
-}
-
 async function getAudioDurationSec(publicRelPath: string | null | undefined): Promise<number | null> {
   if (!publicRelPath) return null;
   const fullPath = path.join(PUBLIC_DIR, publicRelPath.replace(/^\/+/, ""));
@@ -463,7 +477,7 @@ app.get("/api/capabilities", async (_req: Request, res: Response) => {
     hasFfmpeg = false;
   }
   res.json({
-    falConfigured: Boolean(getFalKey()),
+    modalLipsyncConfigured: Boolean(getModalLipsyncConfig()),
     modalVideoConfigured: Boolean(getModalLtxConfig()),
     modalFluxConfigured: Boolean(getModalFluxConfig()),
     modalDemucsConfigured: Boolean(getModalDemucsConfig()),
@@ -1376,7 +1390,7 @@ Rules:
   }
 });
 
-// ---------- Generate All Keyframes (fal-ai/flux-pro/kontext) ----------
+// ---------- Generate All Keyframes (Modal FLUX) ----------
 app.post("/api/projects/:id/generate-keyframes", async (req: Request, res: Response) => {
   const id = String(req.params.id);
 
@@ -1621,13 +1635,10 @@ const renderJobs = new Map<string, RenderJob>();
 
 async function runRenderPipeline(
   projectId: string,
-  falKey: string | null,
   job: RenderJob,
   qualityMode: RenderQualityMode = "turbo"
 ): Promise<void> {
   try {
-    if (falKey) fal.config({ credentials: falKey });
-
     const project = await prisma.project.findUnique({
       where: { id: projectId },
       include: {
@@ -1706,9 +1717,7 @@ async function runRenderPipeline(
 
       try {
         if (s.shotType === "lipsync") {
-          if (!falKey) {
-            throw new Error("FAL_KEY is required only for lip-sync shots. Add it to the app's environment settings or change this shot to B-roll.");
-          }
+          if (!getModalLipsyncConfig()) throw new Error("Modal MuseTalk is not connected. Configure MODAL_LIPSYNC_URL and MODAL_LIPSYNC_API_TOKEN in Render.");
           if (!lipsyncAudioSourceAbs) {
             throw new Error(
               `Shot ${shotNum} is marked 'lipsync', but vocals.wav / song.mp3 was not found.`
@@ -1719,7 +1728,7 @@ async function runRenderPipeline(
             orderIndex: s.orderIndex,
             shotType: s.shotType,
             state: "rendering",
-            label: "Slicing vocals.wav & running sync-lipsync...",
+            label: "Slicing vocals.wav & running MuseTalk lip-sync...",
           };
 
           const vocalSliceAbs = path.join(projectDir, `vocal_${s.orderIndex}.wav`);
@@ -1740,7 +1749,7 @@ async function runRenderPipeline(
             vocalSliceAbs,
           ]);
 
-          // Fast base portrait video clip from scene.imagePath for fal-ai/sync-lipsync
+          // Preserve the existing still-image-to-video input before lip-sync.
           const baseLipsyncVideoAbs = path.join(projectDir, `base_lipsync_${s.orderIndex}.mp4`);
           const vfBase = `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},format=yuv420p`;
 
@@ -1765,23 +1774,7 @@ async function runRenderPipeline(
             baseLipsyncVideoAbs,
           ]);
 
-          const [videoUrl, audioUrl] = await Promise.all([
-            uploadLocalFileToFal(baseLipsyncVideoAbs, "video/mp4"),
-            uploadLocalFileToFal(vocalSliceAbs, "audio/wav"),
-          ]);
-
-          const lipsyncRes = await fal.subscribe("fal-ai/sync-lipsync", {
-            input: {
-              video_url: videoUrl,
-              audio_url: audioUrl,
-            },
-          });
-
-          const outVideoUrl = (lipsyncRes.data as { video?: { url?: string } })?.video?.url;
-          if (!outVideoUrl) {
-            throw new Error(`fal-ai/sync-lipsync returned no video URL for Shot ${shotNum}.`);
-          }
-          await downloadRemoteFile(outVideoUrl, rawClipAbs);
+          await runMuseTalkWithModal(baseLipsyncVideoAbs, vocalSliceAbs, rawClipAbs, shotNum);
           if (fs.existsSync(baseLipsyncVideoAbs)) fs.unlinkSync(baseLipsyncVideoAbs);
         } else {
           const motionPrompt =
@@ -1973,8 +1966,6 @@ app.post("/api/projects/:id/render", async (req: Request, res: Response) => {
       return;
     }
 
-    const falKey = getFalKey();
-
     const project = await prisma.project.findUnique({
       where: { id },
       include: {
@@ -1994,10 +1985,8 @@ app.post("/api/projects/:id/render", async (req: Request, res: Response) => {
       });
       return;
     }
-    if (!falKey && readyScenes.some((scene) => scene.shotType === "lipsync")) {
-      res.status(400).json({
-        error: "FAL_KEY is required for lip-sync shots. B-roll-only renders use Modal LTX and do not require Fal.",
-      });
+    if (!getModalLipsyncConfig() && readyScenes.some((scene) => scene.shotType === "lipsync")) {
+      res.status(400).json({ error: "Modal MuseTalk is not connected. Add MODAL_LIPSYNC_URL and MODAL_LIPSYNC_API_TOKEN in Render." });
       return;
     }
 
@@ -2033,7 +2022,7 @@ app.post("/api/projects/:id/render", async (req: Request, res: Response) => {
     renderJobs.set(id, job);
 
     // Fire background render without blocking HTTP response
-    void runRenderPipeline(id, falKey, job, qualityMode);
+    void runRenderPipeline(id, job, qualityMode);
 
     res.status(202).json({ job });
   } catch (err) {
