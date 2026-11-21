@@ -34,7 +34,7 @@ jobs:
           python-version: "3.11"
 
       - name: Check Modal service syntax
-        run: python -m py_compile modal/ltx_app.py
+        run: python -m py_compile modal/ltx_app.py modal/flux_image_app.py
 
       - name: Install Modal
         run: python -m pip install --upgrade modal
@@ -45,13 +45,21 @@ jobs:
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
         run: modal deploy modal/ltx_app.py
 
-      - name: Print Modal service URL
+      - name: Deploy FLUX image service
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: modal deploy modal/flux_image_app.py
+
+      - name: Print Modal service URLs
         env:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
         run: |
           python - <<'PY'
           import modal
-          fn = modal.Function.from_name("ai-music-creater-ltx", "web_app")
-          print("MODAL_LTX_URL=" + str(fn.get_web_url()))
+          ltx = modal.Function.from_name("ai-music-creater-ltx", "web_app")
+          flux = modal.Function.from_name("ai-music-creater-flux", "web_app")
+          print("MODAL_LTX_URL=" + str(ltx.get_web_url()))
+          print("MODAL_FLUX_URL=" + str(flux.get_web_url()))
           PY
