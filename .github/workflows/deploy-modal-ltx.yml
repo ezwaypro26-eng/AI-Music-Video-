@@ -37,7 +37,7 @@ jobs:
         run: python -m py_compile modal/ltx_app.py modal/flux_image_app.py
 
       - name: Install Modal
-        run: python -m pip install --upgrade modal
+        run: python -m pip install --upgrade modal fastapi
 
       - name: Deploy LTX-2.5 service
         env:
