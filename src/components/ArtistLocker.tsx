@@ -15,7 +15,7 @@ import type { Character } from "../types/studio";
 interface ArtistLockerProps {
   characters: Character[];
   loading: boolean;
-  falConfigured: boolean;
+  fluxConfigured: boolean;
   composerOpen: boolean;
   onToggleComposer: (open: boolean) => void;
   onCharacterCreated: (character: Character) => void;
@@ -33,7 +33,7 @@ const PROMPT_PRESETS = [
 export const ArtistLocker: React.FC<ArtistLockerProps> = ({
   characters,
   loading,
-  falConfigured,
+  fluxConfigured,
   composerOpen,
   onToggleComposer,
   onCharacterCreated,
@@ -251,9 +251,9 @@ export const ArtistLocker: React.FC<ArtistLockerProps> = ({
             </div>
           )}
 
-          {mode === "generate" && !falConfigured && (
+          {mode === "generate" && !fluxConfigured && (
             <div className="rounded-xl bg-amber-950/30 border border-amber-800/50 px-4 py-3 text-sm text-amber-200/90">
-              <span className="font-semibold">FAL_KEY not detected:</span> Add <span className="font-mono">FAL_KEY</span> to your environment secrets to run <span className="font-mono">fal-ai/flux-pro/v1.1</span>, or switch to Upload Photo.
+              <span className="font-semibold">Modal FLUX is not connected:</span> Connect the Modal FLUX service in Render, or switch to Upload Photo.
             </div>
           )}
 
@@ -357,14 +357,14 @@ export const ArtistLocker: React.FC<ArtistLockerProps> = ({
                   <div className="space-y-2">
                     <div className="flex items-center gap-2 text-zinc-300 text-sm font-medium">
                       <ImagePlus className="w-4 h-4 text-amber-400" />
-                      <span>Flux Pro 1.1 Studio Pipeline</span>
+                      <span>FLUX Artist Portrait Pipeline</span>
                     </div>
                     <p className="text-sm text-zinc-400 leading-relaxed">
-                      Generates a 3:4 editorial singer portrait via <span className="font-mono text-zinc-300">@fal-ai/client</span> and saves the image directly into <span className="font-mono text-zinc-300">public/characters/</span> for reuse across scenes.
+                      Generates a 3:4 editorial singer portrait via Hugging Face FLUX on Modal and saves the image directly into <span className="font-mono text-zinc-300">public/characters/</span> for reuse across scenes.
                     </p>
                   </div>
                   <div className="pt-4 border-t border-zinc-800/80 text-xs text-zinc-500 flex items-center justify-between font-mono">
-                    <span>Model: fal-ai/flux-pro/v1.1</span>
+                    <span>Model: FLUX.1-dev</span>
                     <span>3:4 Portrait</span>
                   </div>
                 </div>
