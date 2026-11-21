@@ -5,7 +5,6 @@ import secrets
 import shutil
 import subprocess
 import tempfile
-import zipfile
 from pathlib import Path
 
 import modal
@@ -14,6 +13,8 @@ from fastapi.responses import Response
 
 MODEL_NAME = "htdemucs"
 app = modal.App("ai-music-creater-demucs")
+
+model_cache = modal.Volume.from_name("demucs-model-cache", create_if_missing=True)
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
@@ -31,6 +32,7 @@ web = FastAPI()
     timeout=1800,
     scaledown_window=60,
     max_containers=1,
+    volumes={"/root/.cache/torch": model_cache},
 )
 def separate_vocals(audio_b64: str, filename: str = "song.mp3") -> bytes:
     raw = base64.b64decode(audio_b64)
@@ -64,12 +66,8 @@ def separate_vocals(audio_b64: str, filename: str = "song.mp3") -> bytes:
         if not vocals.exists():
             raise RuntimeError("Demucs completed but did not create vocals.wav.")
 
-        archive = io.BytesIO()
-        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_STORED) as zipped:
-            zipped.write(vocals, "vocals.wav")
-            if accompaniment.exists():
-                zipped.write(accompaniment, "no_vocals.wav")
-        return archive.getvalue()
+        model_cache.commit()
+        return vocals.read_bytes()
 
 
 @web.post("/submit")
@@ -100,8 +98,8 @@ async def result(call_id: str, request: Request):
         raise HTTPException(status_code=500, detail="Demucs completed without returning audio stems.")
     return Response(
         content=bytes(archive_bytes),
-        media_type="application/zip",
-        headers={"Content-Disposition": 'attachment; filename="demucs-stems.zip"'},
+        media_type="audio/wav",
+        headers={"Content-Disposition": 'attachment; filename="vocals.wav"'},
     )
 
 
