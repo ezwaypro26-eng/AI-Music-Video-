@@ -5,7 +5,6 @@
     "": {
       "name": "react-example",
       "dependencies": {
-        "@fal-ai/client": "^1.11.0",
         "@google/genai": "^2.4.0",
         "@prisma/client": "6",
         "@tailwindcss/vite": "^4.3.3",
@@ -94,7 +93,6 @@
 
     "@esbuild/win32-x64": ["@esbuild/win32-x64@0.25.12", "", { "os": "win32", "cpu": "x64" }, "sha512-alJC0uCZpTFrSL0CCDjcgleBXPnCrEAhTBILpeAp7M/OFgoqtAetfBzX0xM00MUsVVPpVjlPuMbREqnZCXaTnA=="],
 
-    "@fal-ai/client": ["@fal-ai/client@1.11.0", "", { "dependencies": { "@msgpack/msgpack": "^3.0.0-beta2", "eventsource-parser": "^1.1.2", "robot3": "^0.4.1" } }, "sha512-LhnPaeYKTo5RFexkW4a7h85msg4SL+Dk3IFc1WEAlIBVF0QQX5+ucmoS6tePNK/zpC22ezp10riDn9Vkl0dNPQ=="],
 
     "@google/genai": ["@google/genai@2.32.0", "", { "dependencies": { "google-auth-library": "^10.3.0", "p-retry": "^4.6.2", "protobufjs": "^7.5.4", "ws": "^8.18.0" }, "peerDependencies": { "@modelcontextprotocol/sdk": "^1.25.2" }, "optionalPeers": ["@modelcontextprotocol/sdk"], "hasInstallScript": true }, "sha512-60c79uXpR0a47bmGqDxbXEBuQUalNmwo5mx5kqb91jIW4FoqpsLSt86DeVhRhtH5+s/16Wqxt3sXzFQn2U1OHQ=="],
 
