@@ -192,6 +192,83 @@ async function downloadImageToPublic(imageUrl: string, destDir: string, prefix: 
   return `/${relFromPublic}`;
 }
 
+function getModalDemucsConfig(): { url: string; token: string } | null {
+  const url = process.env.MODAL_DEMUCS_URL?.trim().replace(/\\/+$/, "");
+  const token = process.env.MODAL_DEMUCS_API_TOKEN?.trim();
+  if (!url || !token) return null;
+  return { url, token };
+}
+
+async function separateVocalsWithModalDemucs(audioAbsPath: string, projectDir: string): Promise<string> {
+  const config = getModalDemucsConfig();
+  if (!config) {
+    throw new Error("Modal Demucs is not connected yet. Add MODAL_DEMUCS_URL and MODAL_DEMUCS_API_TOKEN to the app environment settings after deploying the Modal Demucs service.");
+  }
+  if (!fs.existsSync(audioAbsPath)) throw new Error("The uploaded song could not be found for vocal separation.");
+
+  const audioBase64 = fs.readFileSync(audioAbsPath).toString("base64");
+  const submitResponse = await fetch(`${config.url}/submit`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${config.token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ audio_base64: audioBase64, filename: path.basename(audioAbsPath) }),
+  });
+  if (!submitResponse.ok) {
+    const detail = await submitResponse.text();
+    throw new Error(`Modal Demucs could not accept the song (${submitResponse.status}): ${detail.slice(0, 500)}`);
+  }
+  const submitted = (await submitResponse.json()) as { call_id?: string };
+  if (!submitted.call_id) throw new Error("Modal Demucs did not return a separation job ID.");
+
+  const deadline = Date.now() + 30 * 60 * 1000;
+  while (Date.now() < deadline) {
+    const resultResponse = await fetch(
+      `${config.url}/result/${encodeURIComponent(submitted.call_id)}`,
+      { headers: { authorization: `Bearer ${config.token}` } }
+    );
+    if (!resultResponse.ok) {
+      const detail = await resultResponse.text();
+      throw new Error(`Modal Demucs separation failed (${resultResponse.status}): ${detail.slice(0, 500)}`);
+    }
+    const contentType = resultResponse.headers.get("content-type") || "";
+    if (contentType.includes("application/zip")) {
+      const zipBytes = Buffer.from(await resultResponse.arrayBuffer());
+      if (zipBytes.length < 1024) throw new Error("Modal Demucs returned an empty stem archive.");
+      const archivePath = path.join(projectDir, `demucs-stems-${Date.now()}.zip`);
+      fs.writeFileSync(archivePath, zipBytes);
+      try {
+        await execFileAsync("python", ["-c",
+          "import sys,zipfile; z=zipfile.ZipFile(sys.argv[1]); z.extractall(sys.argv[2])",
+          archivePath, projectDir,
+        ]);
+      } finally {
+        if (fs.existsSync(archivePath)) fs.unlinkSync(archivePath);
+      }
+      const vocalsPath = path.join(projectDir, "vocals.wav");
+      if (fs.existsSync(vocalsPath)) fs.unlinkSync(vocalsPath);
+      const candidates: string[] = [];
+      const walk = (dir: string) => {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, entry.name);
+          if (entry.isDirectory()) walk(full);
+          else if (entry.name.toLowerCase() === "vocals.wav") candidates.push(full);
+        }
+      };
+      walk(projectDir);
+      const source = candidates.find((candidate) => candidate !== vocalsPath);
+      if (!source) throw new Error("Demucs finished but did not return vocals.wav.");
+      fs.copyFileSync(source, vocalsPath);
+      return `/projects/${path.basename(projectDir)}/vocals.wav`;
+    }
+    const status = (await resultResponse.json()) as { status?: string; detail?: string };
+    if (status.status === "failed") throw new Error(status.detail || "Demucs separation failed.");
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+  throw new Error("Demucs took too long to separate this song. Check the Modal app logs before retrying.");
+}
+
 function getModalFluxConfig(): { url: string; token: string } | null {
   const url = process.env.MODAL_FLUX_URL?.trim().replace(/\/+$/, "");
   const token = process.env.MODAL_FLUX_API_TOKEN?.trim();
@@ -361,6 +438,7 @@ app.get("/api/capabilities", async (_req: Request, res: Response) => {
     falConfigured: Boolean(getFalKey()),
     modalVideoConfigured: Boolean(getModalLtxConfig()),
     modalFluxConfigured: Boolean(getModalFluxConfig()),
+    modalDemucsConfigured: Boolean(getModalDemucsConfig()),
     geminiConfigured: Boolean(getGeminiKey()),
     openaiConfigured: Boolean(getOpenAiKey()),
     ffmpegAvailable: hasFfmpeg,
@@ -667,7 +745,14 @@ app.post("/api/projects/:id/analyze-audio", uploadAudioTrack.single("file"), asy
     const falKey = getFalKey();
     if (!falKey) {
       res.status(400).json({
-        error: `Song saved to public/projects/${id}/song.mp3, but FAL_KEY is not configured. Add FAL_KEY in Secrets to run fal-ai/whisper and fal-ai/demucs.`,
+        error: `Song saved to public/projects/${id}/song.mp3, but FAL_KEY is not configured. Add FAL_KEY in Secrets to run Whisper transcription.`,
+        project: savedWithAudio,
+      });
+      return;
+    }
+    if (!getModalDemucsConfig()) {
+      res.status(400).json({
+        error: `Song saved to public/projects/${id}/song.mp3, but Modal Demucs is not connected. Add MODAL_DEMUCS_URL and MODAL_DEMUCS_API_TOKEN to the app environment settings.`,
         project: savedWithAudio,
       });
       return;
@@ -675,13 +760,12 @@ app.post("/api/projects/:id/analyze-audio", uploadAudioTrack.single("file"), asy
 
     fal.config({ credentials: falKey });
 
-    // Upload song.mp3 to Fal storage
+    // Whisper remains on fal.ai; vocal separation runs on the Modal Demucs service.
     const songBuffer = fs.readFileSync(targetSongPath);
     const audioFile = new File([songBuffer], "song.mp3", { type: "audio/mpeg" });
     const falAudioUrl = await fal.storage.upload(audioFile);
 
-    // Run Whisper (segment timestamps) and Demucs (vocal stem isolation) in parallel
-    const [whisperResult, demucsResult] = await Promise.all([
+    const [whisperResult, vocalStemPath] = await Promise.all([
       fal.subscribe("fal-ai/whisper", {
         input: {
           audio_url: falAudioUrl,
@@ -689,11 +773,7 @@ app.post("/api/projects/:id/analyze-audio", uploadAudioTrack.single("file"), asy
           chunk_level: "segment",
         },
       }),
-      fal.subscribe("fal-ai/demucs", {
-        input: {
-          audio_url: falAudioUrl,
-        },
-      }),
+      separateVocalsWithModalDemucs(targetSongPath, projectDir),
     ]);
 
     const whisperData = (whisperResult.data || {}) as {
@@ -726,37 +806,14 @@ app.post("/api/projects/:id/analyze-audio", uploadAudioTrack.single("file"), asy
       });
     }
 
-    const demucsData = (demucsResult.data || {}) as {
-      vocals?: { url?: string; content_type?: string } | string;
-    };
-    const vocalsUrl =
-      typeof demucsData.vocals === "string" ? demucsData.vocals : demucsData.vocals?.url;
-
-    let vocalStemPath: string | null = existing.vocalStemPath;
-    if (vocalsUrl) {
-      const vocalsResp = await fetch(vocalsUrl);
-      if (!vocalsResp.ok) {
-        throw new Error(`Failed to download isolated vocal stem (${vocalsResp.status}).`);
-      }
-      const vocalsBuffer = Buffer.from(await vocalsResp.arrayBuffer());
-      const targetVocalsPath = path.join(projectDir, "vocals.wav");
-      const ct = vocalsResp.headers.get("content-type") || "";
-      if (ct.includes("wav") || vocalsUrl.toLowerCase().includes(".wav")) {
-        fs.writeFileSync(targetVocalsPath, vocalsBuffer);
-      } else {
-        const tmpVocals = path.join(projectDir, `vocals-raw-${Date.now()}.tmp`);
-        fs.writeFileSync(tmpVocals, vocalsBuffer);
-        await execFileAsync("ffmpeg", ["-y", "-i", tmpVocals, targetVocalsPath]);
-        if (fs.existsSync(tmpVocals)) fs.unlinkSync(tmpVocals);
-      }
-      vocalStemPath = `/projects/${id}/vocals.wav`;
-    }
+    // Modal Demucs has already saved the isolated 44.1 kHz vocal stem in the project folder.
+    const isolatedVocalStemPath = vocalStemPath || existing.vocalStemPath;
 
     const updatedProject = await prisma.project.update({
       where: { id },
       data: {
         audioPath,
-        vocalStemPath,
+        vocalStemPath: isolatedVocalStemPath,
         lyricsJson: JSON.stringify(segments),
         status: "analyzed",
       },
