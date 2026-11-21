@@ -192,6 +192,56 @@ async function downloadImageToPublic(imageUrl: string, destDir: string, prefix: 
   return `/${relFromPublic}`;
 }
 
+function getModalWhisperConfig(): { url: string; token: string } | null {
+  const url = process.env.MODAL_WHISPER_URL?.trim().replace(/\\/+$/, "");
+  const token = process.env.MODAL_WHISPER_API_TOKEN?.trim();
+  if (!url || !token) return null;
+  return { url, token };
+}
+
+async function transcribeWithModalWhisper(audioAbsPath: string): Promise<{
+  text?: string;
+  chunks?: Array<{ text?: string; timestamp?: [number, number | null] }>;
+}> {
+  const config = getModalWhisperConfig();
+  if (!config) throw new Error("Modal Whisper is not connected. Add MODAL_WHISPER_URL and MODAL_WHISPER_API_TOKEN to the app environment settings.");
+  if (!fs.existsSync(audioAbsPath)) throw new Error("The uploaded song could not be found for transcription.");
+
+  const audioBase64 = fs.readFileSync(audioAbsPath).toString("base64");
+  const submitResponse = await fetch(`${config.url}/submit`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${config.token}`, "content-type": "application/json" },
+    body: JSON.stringify({ audio_base64: audioBase64, filename: path.basename(audioAbsPath) }),
+  });
+  if (!submitResponse.ok) {
+    const detail = await submitResponse.text();
+    throw new Error(`Hugging Face Whisper could not accept the song (${submitResponse.status}): ${detail.slice(0, 500)}`);
+  }
+  const submitted = (await submitResponse.json()) as { call_id?: string };
+  if (!submitted.call_id) throw new Error("Hugging Face Whisper did not return a transcription job ID.");
+
+  const deadline = Date.now() + 30 * 60 * 1000;
+  while (Date.now() < deadline) {
+    const resultResponse = await fetch(`${config.url}/result/${encodeURIComponent(submitted.call_id)}`, {
+      headers: { authorization: `Bearer ${config.token}` },
+    });
+    if (!resultResponse.ok) {
+      const detail = await resultResponse.text();
+      throw new Error(`Hugging Face Whisper failed (${resultResponse.status}): ${detail.slice(0, 500)}`);
+    }
+    const result = (await resultResponse.json()) as {
+      status?: string;
+      detail?: string;
+      text?: string;
+      chunks?: Array<{ text?: string; timestamp?: [number, number | null] }>;
+    };
+    if (result.status === "failed") throw new Error(result.detail || "Hugging Face Whisper transcription failed.");
+    if (result.status === "completed") return { text: result.text || "", chunks: result.chunks || [] };
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+  throw new Error("Whisper took too long to transcribe this song. Check the Modal app logs before retrying.");
+}
+
 function getModalDemucsConfig(): { url: string; token: string } | null {
   const url = process.env.MODAL_DEMUCS_URL?.trim().replace(/\/+$/, "");
   const token = process.env.MODAL_DEMUCS_API_TOKEN?.trim();
@@ -417,6 +467,7 @@ app.get("/api/capabilities", async (_req: Request, res: Response) => {
     modalVideoConfigured: Boolean(getModalLtxConfig()),
     modalFluxConfigured: Boolean(getModalFluxConfig()),
     modalDemucsConfigured: Boolean(getModalDemucsConfig()),
+    modalWhisperConfigured: Boolean(getModalWhisperConfig()),
     geminiConfigured: Boolean(getGeminiKey()),
     openaiConfigured: Boolean(getOpenAiKey()),
     ffmpegAvailable: hasFfmpeg,
@@ -720,10 +771,9 @@ app.post("/api/projects/:id/analyze-audio", uploadAudioTrack.single("file"), asy
       },
     });
 
-    const falKey = getFalKey();
-    if (!falKey) {
+    if (!getModalWhisperConfig()) {
       res.status(400).json({
-        error: `Song saved to public/projects/${id}/song.mp3, but FAL_KEY is not configured. Add FAL_KEY in Secrets to run Whisper transcription.`,
+        error: `Song saved to public/projects/${id}/song.mp3, but Hugging Face Whisper is not connected. Add MODAL_WHISPER_URL and MODAL_WHISPER_API_TOKEN to the app environment settings.`,
         project: savedWithAudio,
       });
       return;
@@ -736,28 +786,11 @@ app.post("/api/projects/:id/analyze-audio", uploadAudioTrack.single("file"), asy
       return;
     }
 
-    fal.config({ credentials: falKey });
-
-    // Whisper remains on fal.ai; vocal separation runs on the Modal Demucs service.
-    const songBuffer = fs.readFileSync(targetSongPath);
-    const audioFile = new File([songBuffer], "song.mp3", { type: "audio/mpeg" });
-    const falAudioUrl = await fal.storage.upload(audioFile);
-
-    const [whisperResult, vocalStemPath] = await Promise.all([
-      fal.subscribe("fal-ai/whisper", {
-        input: {
-          audio_url: falAudioUrl,
-          task: "transcribe",
-          chunk_level: "segment",
-        },
-      }),
+    // Whisper large-v3 runs from Hugging Face on Modal; Demucs remains a separate Modal service.
+    const [whisperData, vocalStemPath] = await Promise.all([
+      transcribeWithModalWhisper(targetSongPath),
       separateVocalsWithModalDemucs(targetSongPath, projectDir),
     ]);
-
-    const whisperData = (whisperResult.data || {}) as {
-      text?: string;
-      chunks?: Array<{ text?: string; timestamp?: [number, number | null] }>;
-    };
 
     const rawChunks = Array.isArray(whisperData.chunks) ? whisperData.chunks : [];
     const segments = rawChunks
