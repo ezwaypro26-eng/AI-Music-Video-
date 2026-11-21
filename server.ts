@@ -283,7 +283,7 @@ async function separateVocalsWithModalDemucs(audioAbsPath: string, projectDir: s
       throw new Error(`Modal Demucs separation failed (${resultResponse.status}): ${detail.slice(0, 500)}`);
     }
     const contentType = resultResponse.headers.get("content-type") || "";
-    if (contentType.includes("application/zip")) {
+    if (contentType.includes("audio/wav") || contentType.includes("audio/x-wav")) {
       const vocalsBuffer = Buffer.from(await resultResponse.arrayBuffer());
       if (vocalsBuffer.length < 1024) throw new Error("Modal Demucs returned an empty vocal stem.");
       const vocalsPath = path.join(projectDir, "vocals.wav");
