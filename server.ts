@@ -308,7 +308,7 @@ async function generateSceneKeyframeWithFlux(params: {
   });
 }
 
-async function downloadRemoteFileasync function downloadRemoteFile(url: string, targetAbsPath: string): Promise<void> {
+async function downloadRemoteFile(url: string, targetAbsPath: string): Promise<void> {
   const resp = await fetch(url);
   if (!resp.ok) {
     throw new Error(`Failed to download remote media (${resp.status})`);
