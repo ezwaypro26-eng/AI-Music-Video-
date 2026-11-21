@@ -193,7 +193,7 @@ async function downloadImageToPublic(imageUrl: string, destDir: string, prefix: 
 }
 
 function getModalDemucsConfig(): { url: string; token: string } | null {
-  const url = process.env.MODAL_DEMUCS_URL?.trim().replace(/\\/+$/, "");
+  const url = process.env.MODAL_DEMUCS_URL?.trim().replace(/\/+$/, "");
   const token = process.env.MODAL_DEMUCS_API_TOKEN?.trim();
   if (!url || !token) return null;
   return { url, token };
@@ -234,32 +234,10 @@ async function separateVocalsWithModalDemucs(audioAbsPath: string, projectDir: s
     }
     const contentType = resultResponse.headers.get("content-type") || "";
     if (contentType.includes("application/zip")) {
-      const zipBytes = Buffer.from(await resultResponse.arrayBuffer());
-      if (zipBytes.length < 1024) throw new Error("Modal Demucs returned an empty stem archive.");
-      const archivePath = path.join(projectDir, `demucs-stems-${Date.now()}.zip`);
-      fs.writeFileSync(archivePath, zipBytes);
-      try {
-        await execFileAsync("python", ["-c",
-          "import sys,zipfile; z=zipfile.ZipFile(sys.argv[1]); z.extractall(sys.argv[2])",
-          archivePath, projectDir,
-        ]);
-      } finally {
-        if (fs.existsSync(archivePath)) fs.unlinkSync(archivePath);
-      }
+      const vocalsBuffer = Buffer.from(await resultResponse.arrayBuffer());
+      if (vocalsBuffer.length < 1024) throw new Error("Modal Demucs returned an empty vocal stem.");
       const vocalsPath = path.join(projectDir, "vocals.wav");
-      if (fs.existsSync(vocalsPath)) fs.unlinkSync(vocalsPath);
-      const candidates: string[] = [];
-      const walk = (dir: string) => {
-        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-          const full = path.join(dir, entry.name);
-          if (entry.isDirectory()) walk(full);
-          else if (entry.name.toLowerCase() === "vocals.wav") candidates.push(full);
-        }
-      };
-      walk(projectDir);
-      const source = candidates.find((candidate) => candidate !== vocalsPath);
-      if (!source) throw new Error("Demucs finished but did not return vocals.wav.");
-      fs.copyFileSync(source, vocalsPath);
+      fs.writeFileSync(vocalsPath, vocalsBuffer);
       return `/projects/${path.basename(projectDir)}/vocals.wav`;
     }
     const status = (await resultResponse.json()) as { status?: string; detail?: string };
