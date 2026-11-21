@@ -139,7 +139,7 @@ def _download_models() -> None:
     scaledown_window=120,
     max_containers=1,
     secrets=[service_secret],
-    volumes={"/root/.cache/huggingface": model_cache, "/opt/MuseTalk/models": model_cache},
+    volumes={"/opt/MuseTalk/models": model_cache},
 )
 def run_musetalk(video_b64: str, audio_b64: str) -> bytes:
     import yaml
