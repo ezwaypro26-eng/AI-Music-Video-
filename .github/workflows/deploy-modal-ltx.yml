@@ -1,4 +1,4 @@
-name: Deploy LTX-2.5 and FLUX to Modal
+name: Deploy Demucs, LTX-2.5 and FLUX to Modal
 
 on:
   workflow_dispatch:
@@ -39,6 +39,12 @@ jobs:
       - name: Install Modal
         run: python -m pip install --upgrade modal fastapi
 
+      - name: Deploy Demucs vocal separation service
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: modal deploy modal/demucs_app.py
+
       - name: Deploy LTX-2.5 service
         env:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
@@ -50,12 +56,6 @@ jobs:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
         run: modal deploy modal/flux_image_app.py
-
-      - name: Deploy Demucs vocal separation service
-        env:
-          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
-          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
-        run: modal deploy modal/demucs_app.py
 
       - name: Print Modal service URLs
         env:
