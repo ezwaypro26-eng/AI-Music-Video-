@@ -13,6 +13,7 @@ from fastapi.responses import Response
 
 MODEL_NAME = "htdemucs"
 app = modal.App("ai-music-creater-demucs")
+app_secret = modal.Secret.from_name("huggingface-secret")
 
 model_cache = modal.Volume.from_name("demucs-model-cache", create_if_missing=True)
 
@@ -110,7 +111,7 @@ def _authorize(request: Request):
         raise HTTPException(status_code=401, detail="Unauthorized.")
 
 
-@app.function(image=image, scaledown_window=60)
+@app.function(image=image, secrets=[app_secret], scaledown_window=60)
 @modal.asgi_app()
 def web_app():
     return web
