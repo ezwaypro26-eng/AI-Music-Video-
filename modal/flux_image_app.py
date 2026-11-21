@@ -122,6 +122,11 @@ def generate_image(
     return output.getvalue()
 
 
+@web.get("/health")
+async def health():
+    return {"ok": True, "models": [FLUX_DEV_ID, FLUX_KONTEXT_ID]}
+
+
 @web.post("/generate")
 async def generate(request: Request):
     _authorize(request)
