@@ -20,7 +20,8 @@ model_cache = modal.Volume.from_name("demucs-model-cache", create_if_missing=Tru
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("ffmpeg")
-    .pip_install("fastapi", "demucs")
+    # Install NumPy explicitly: PyTorch's tensor-to-NumPy bridge requires it.
+    .pip_install("numpy", "fastapi", "demucs")
 )
 
 web = FastAPI()
