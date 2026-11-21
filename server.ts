@@ -1411,7 +1411,7 @@ app.post("/api/projects/:id/generate-keyframes", async (req: Request, res: Respo
       return;
     }
 
-    // Keep the existing bulk-keyframe workflow; FLUX runs through Modal instead of fal.ai.
+    // Keep the existing bulk-keyframe workflow; FLUX runs through Modal.
     const batchSize = 3;
     for (let i = 0; i < project.scenes.length; i += batchSize) {
       const batch = project.scenes.slice(i, i + batchSize);
