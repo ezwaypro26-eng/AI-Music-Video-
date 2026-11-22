@@ -28,6 +28,7 @@ image = (
         "sentencepiece",
         "protobuf",
         "pillow",
+        "fastapi",
     )
     .pip_install("git+https://github.com/huggingface/diffusers")
     .env({"HF_HOME": CACHE_DIR})
