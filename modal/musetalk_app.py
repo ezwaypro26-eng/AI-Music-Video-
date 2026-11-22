@@ -37,7 +37,7 @@ image = (
         "cd /opt/MuseTalk && mim install mmcv==2.0.1",
         "cd /opt/MuseTalk && mim install mmdet==3.1.0",
         "cd /opt/MuseTalk && mim install mmpose==1.1.0",
-        "pip install --no-cache-dir gdown",
+        "pip install --no-cache-dir gdown fastapi",
     )
 )
 
