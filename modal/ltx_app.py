@@ -23,6 +23,7 @@ image = (
         "fastapi",
         "torch",
         "torchvision",
+        "av",
         "pillow",
         "numpy",
         "transformers",
@@ -58,7 +59,7 @@ def _load_pipeline():
         cache_dir=CACHE_DIR,
         dtype=torch.bfloat16,
     )
-    _pipeline.enable_sequential_cpu_offload(device="cuda")
+    _pipeline.to("cuda")
     _pipeline.vae.enable_tiling()
     model_cache.commit()
     return _pipeline
@@ -70,8 +71,8 @@ def _load_pipeline():
     memory=131072,
     timeout=3600,
     startup_timeout=1800,
-    scaledown_window=60,
-    max_containers=1,
+    scaledown_window=300,
+    max_containers=4,
     secrets=[hf_secret],
     volumes={"/cache": model_cache},
 )
