@@ -17,7 +17,7 @@ model_cache = modal.Volume.from_name("whisper-model-cache", create_if_missing=Tr
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("ffmpeg")
-    .pip_install("torch", "transformers", "accelerate", "safetensors", "soundfile")
+    .pip_install("torch", "transformers", "accelerate", "safetensors", "soundfile", "fastapi",)
 )
 
 web = FastAPI()
