@@ -22,6 +22,7 @@ image = (
     .pip_install(
         "fastapi",
         "torch",
+        "torchvision",
         "pillow",
         "numpy",
         "transformers",
