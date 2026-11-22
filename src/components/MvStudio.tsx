@@ -404,7 +404,7 @@ export const MvStudio: React.FC<MvStudioProps> = ({
 
       if (newAudioFile) {
         setProcessingStage(
-          "Saving song.mp3, uploading to Fal storage, and running Whisper + Demucs in parallel..."
+          "Saving song.mp3 and running Modal Whisper + Modal Demucs in parallel..."
         );
         setAnalyzingAudio(true);
 
