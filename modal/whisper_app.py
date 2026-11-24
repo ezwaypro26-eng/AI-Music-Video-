@@ -71,25 +71,78 @@ class WhisperWorker:
             if converted_result.returncode != 0:
                 raise RuntimeError((converted_result.stderr or "Could not decode audio.")[-2000:])
 
+            # Word timestamps are essential: segment-level Whisper timestamps can
+            # span minutes and cannot be matched accurately to 4-5 second shots.
             result = self.transcriber(
                 str(converted),
                 chunk_length_s=30,
-                batch_size=8,
-                return_timestamps=True,
+                batch_size=1,
+                return_timestamps="word",
                 generate_kwargs={"task": "transcribe"},
             )
 
-        chunks = []
+        words = []
         for item in result.get("chunks", []) or []:
-            timestamp = item.get("timestamp") or (0.0, None)
-            chunks.append({
-                "text": str(item.get("text") or "").strip(),
+            timestamp = item.get("timestamp") or (None, None)
+            start = timestamp[0]
+            end = timestamp[1]
+            text = str(item.get("text") or "").strip()
+            if not text or start is None or end is None:
+                continue
+            start_sec = max(0.0, float(start))
+            end_sec = max(start_sec + 0.01, float(end))
+            words.append({
+                "text": text,
+                "start": round(start_sec, 3),
+                "end": round(end_sec, 3),
+            })
+
+        words.sort(key=lambda item: (item["start"], item["end"]))
+
+        # Build readable UI phrases from word timestamps. Split on natural
+        # pauses, at about 4.5 seconds, or after 9 words—never multi-minute spans.
+        phrase_chunks = []
+        current_words = []
+
+        def flush_phrase():
+            if not current_words:
+                return
+            phrase_chunks.append({
+                "text": " ".join(word["text"] for word in current_words).strip(),
                 "timestamp": [
-                    float(timestamp[0] or 0.0),
-                    float(timestamp[1]) if timestamp[1] is not None else None,
+                    round(current_words[0]["start"], 3),
+                    round(current_words[-1]["end"], 3),
                 ],
             })
-        return {"text": str(result.get("text") or "").strip(), "chunks": chunks}
+            current_words.clear()
+
+        for word in words:
+            if current_words:
+                pause = word["start"] - current_words[-1]["end"]
+                phrase_duration = word["end"] - current_words[0]["start"]
+                if pause >= 0.60 or phrase_duration >= 4.5 or len(current_words) >= 9:
+                    flush_phrase()
+            current_words.append(word)
+        flush_phrase()
+
+        # Preserve legacy segment chunks if the model could not provide word
+        # alignment, while exposing an empty words array so callers can detect it.
+        if not phrase_chunks:
+            for item in result.get("chunks", []) or []:
+                timestamp = item.get("timestamp") or (0.0, None)
+                phrase_chunks.append({
+                    "text": str(item.get("text") or "").strip(),
+                    "timestamp": [
+                        float(timestamp[0] or 0.0),
+                        float(timestamp[1]) if timestamp[1] is not None else None,
+                    ],
+                })
+
+        return {
+            "text": str(result.get("text") or "").strip(),
+            "chunks": phrase_chunks,
+            "words": words,
+        }
 
 
 worker = WhisperWorker()
