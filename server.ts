@@ -1136,7 +1136,7 @@ const MUSIC_VIDEO_TYPE_DIRECTIONS: Record<MusicVideoType, string> = {
   visualizer:
     "Style: Cinematic B-Roll / Visualizer. Focus heavily on atmospheric visual storytelling, mood, and environmental metaphors (`shotType: 'broll'` for ~85-90% of shots, saving `lipsync` only for 1-2 peak chorus moments).",
   hype:
-    "Style: High-Energy Rap / Dance Cut. Emphasize bold low-angle hero framing, rapid kinetic energy, club/street neon lighting, confident lip-sync hooks (`lipsync` on chorus/hook), and punchy kinetic B-roll.",
+    "Style: High-Energy Rap / Dance Cut. Emphasize bold low-angle hero framing, rapid kinetic energy, hard-source stage strobes, sodium-amber practicals, direct-flash highlights, confident lip-sync hooks (`lipsync` on chorus/hook), and punchy kinetic B-roll.",
   retro:
     "Style: Retro 90s VHS / Analog Film. Warm halation, nostalgic 35mm film grain, candid late-night locations, intimate camcorder/stage textures, balancing soulful lip-sync and vintage B-roll.",
 };
@@ -1321,7 +1321,12 @@ app.post("/api/projects/:id/generate-storyboard", async (req: Request, res: Resp
         const startSec = Number((win.start + (winDur * shotIndex) / targetShots).toFixed(3));
         const endSec = Number((win.start + (winDur * (shotIndex + 1)) / targetShots).toFixed(3));
         const lyricSegment = timestampedWords
-          .filter((word) => word.endSec > startSec && word.startSec < endSec)
+          .filter((word) => {
+            // Assign a word to exactly one shot even when its timestamp crosses
+            // a shot boundary.
+            const midpoint = (word.startSec + word.endSec) / 2;
+            return midpoint >= startSec && midpoint < endSec;
+          })
           .map((word) => word.text)
           .join(" ")
           .trim();
@@ -1336,7 +1341,6 @@ app.post("/api/projects/:id/generate-storyboard", async (req: Request, res: Resp
 
     const chunkResults = await Promise.all(
       windows.map(async (win) => {
-        const winDur = Number((win.end - win.start).toFixed(1));
         const shotWindows = shotWindowsByWindow[win.index] || [];
         const targetShots = shotWindows.length;
         const localSegments = whisperSegments.filter(
