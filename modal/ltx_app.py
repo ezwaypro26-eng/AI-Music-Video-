@@ -1,4 +1,5 @@
 import base64
+import gc
 import io
 import os
 import secrets
@@ -34,7 +35,7 @@ image = (
         "imageio[ffmpeg]",
     )
     .pip_install("git+https://github.com/huggingface/diffusers")
-    .env({"HF_HOME": CACHE_DIR})
+    .env({"HF_HOME": CACHE_DIR, "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"})
 )
 
 web = FastAPI()
@@ -59,8 +60,12 @@ def _load_pipeline():
         cache_dir=CACHE_DIR,
         dtype=torch.bfloat16,
     )
-    _pipeline.to("cuda")
-    _pipeline.vae.enable_tiling()
+    # Keep weights off the A100 until their layer is needed. This avoids
+    # pinning the complete LTX-2.5 pipeline in VRAM between requests.
+    _pipeline.enable_model_cpu_offload()
+    if hasattr(_pipeline, "vae"):
+        _pipeline.vae.enable_slicing()
+        _pipeline.vae.enable_tiling()
     model_cache.commit()
     return _pipeline
 
@@ -72,48 +77,67 @@ def _load_pipeline():
     timeout=3600,
     startup_timeout=1800,
     scaledown_window=300,
-    max_containers=4,
+    max_containers=1,
     secrets=[hf_secret],
     volumes={"/cache": model_cache},
 )
+@modal.concurrent(max_inputs=1)
 def generate_video(image_b64: str, prompt: str, aspect_ratio: str = "16:9", seed: int = 42) -> bytes:
     import torch
     from PIL import Image
     from diffusers.pipelines.ltx2.utils import DISTILLED_SIGMA_VALUES
     from diffusers.utils import encode_video
 
-    raw = base64.b64decode(image_b64)
-    source_image = Image.open(io.BytesIO(raw)).convert("RGB")
+    raw = None
+    source_image = None
+    video = None
+    generated_audio = None
+    generator = None
+    try:
+        raw = base64.b64decode(image_b64)
+        source_image = Image.open(io.BytesIO(raw)).convert("RGB")
 
-    # LTX-2.5 requires dimensions divisible by 32. These preserve the
-    # requested aspect ratios before the app's final 1080p FFmpeg scaling.
-    if aspect_ratio == "9:16":
-        width, height = 544, 960
-    elif aspect_ratio == "1:1":
-        width, height = 512, 512
-    else:
-        width, height = 960, 544
+        # LTX-2.5 requires dimensions divisible by 32.
+        if aspect_ratio == "9:16":
+            width, height = 544, 960
+        elif aspect_ratio == "1:1":
+            width, height = 512, 512
+        else:
+            width, height = 960, 544
 
-    pipe = _load_pipeline()
-    video, _audio = pipe(
-        image=source_image,
-        prompt=prompt,
-        width=width,
-        height=height,
-        num_frames=121,
-        frame_rate=24.0,
-        sigmas=DISTILLED_SIGMA_VALUES,
-        guidance_scale=1.0,
-        audio_guidance_scale=1.0,
-        generator=torch.Generator(device="cuda").manual_seed(seed),
-        output_type="np",
-        return_dict=False,
-    )
+        pipe = _load_pipeline()
+        generator = torch.Generator(device="cuda").manual_seed(seed)
+        # Inference mode disables autograd bookkeeping for every denoising step.
+        with torch.inference_mode():
+            video, generated_audio = pipe(
+                image=source_image,
+                prompt=prompt,
+                width=width,
+                height=height,
+                num_frames=121,
+                frame_rate=24.0,
+                sigmas=DISTILLED_SIGMA_VALUES,
+                guidance_scale=1.0,
+                audio_guidance_scale=1.0,
+                generator=generator,
+                output_type="np",
+                return_dict=False,
+            )
 
-    with tempfile.NamedTemporaryFile(suffix=".mp4") as output_file:
-        encode_video(video[0], fps=24.0, output_path=output_file.name)
-        output_file.seek(0)
-        return output_file.read()
+        with tempfile.NamedTemporaryFile(suffix=".mp4") as output_file:
+            encode_video(video[0], fps=24.0, output_path=output_file.name)
+            output_file.seek(0)
+            return output_file.read()
+    finally:
+        # Drop references before asking PyTorch to release cached blocks.
+        del video
+        del generated_audio
+        del generator
+        del source_image
+        del raw
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
 
 @web.post("/submit")
