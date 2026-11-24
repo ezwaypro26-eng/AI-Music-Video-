@@ -3,6 +3,7 @@ import os
 import secrets
 import subprocess
 import tempfile
+import urllib.request
 from pathlib import Path
 
 import modal
@@ -115,11 +116,12 @@ def _download_models() -> None:
         if not result:
             raise RuntimeError("Could not download the official MuseTalk face-parsing checkpoint.")
     if not required[7].exists() or required[7].stat().st_size < 1024:
-        import urllib.request
         urllib.request.urlretrieve(
             "https://download.pytorch.org/models/resnet18-5c106cde.pth",
             str(required[7]),
         )
+    model_cache.commit()
+
 
 @app.function(
     image=image,
