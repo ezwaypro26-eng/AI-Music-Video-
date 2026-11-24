@@ -234,6 +234,7 @@ function getModalWhisperConfig(): { url: string; token: string } | null {
 async function transcribeWithModalWhisper(audioAbsPath: string): Promise<{
   text?: string;
   chunks?: Array<{ text?: string; timestamp?: [number, number | null] }>;
+  words?: Array<{ text?: string; start?: number; end?: number }>;
 }> {
   const config = getModalWhisperConfig();
   if (!config) throw new Error("Modal Whisper is not connected. Add MODAL_WHISPER_URL and MODAL_WHISPER_API_TOKEN to the app environment settings.");
@@ -266,9 +267,14 @@ async function transcribeWithModalWhisper(audioAbsPath: string): Promise<{
       detail?: string;
       text?: string;
       chunks?: Array<{ text?: string; timestamp?: [number, number | null] }>;
+      words?: Array<{ text?: string; start?: number; end?: number }>;
     };
     if (result.status === "failed") throw new Error(result.detail || "Hugging Face Whisper transcription failed.");
-    if (result.status === "completed") return { text: result.text || "", chunks: result.chunks || [] };
+    if (result.status === "completed") return {
+      text: result.text || "",
+      chunks: result.chunks || [],
+      words: result.words || [],
+    };
     await new Promise((resolve) => setTimeout(resolve, 3000));
   }
   throw new Error("Whisper took too long to transcribe this song. Check the Modal app logs before retrying.");
@@ -807,17 +813,36 @@ app.post("/api/projects/:id/analyze-audio", uploadAudioTrack.single("file"), asy
     ]);
 
     const rawChunks = Array.isArray(whisperData.chunks) ? whisperData.chunks : [];
+    const rawWords = Array.isArray(whisperData.words) ? whisperData.words : [];
+    const normalizedWords = rawWords
+      .map((word) => ({
+        text: String(word.text || "").trim(),
+        startSec: Number(word.start ?? 0),
+        endSec: Number(word.end ?? word.start ?? 0),
+      }))
+      .filter((word) => word.text.length > 0 && Number.isFinite(word.startSec) && Number.isFinite(word.endSec))
+      .map((word) => ({
+        ...word,
+        startSec: Number(Math.max(0, word.startSec).toFixed(3)),
+        endSec: Number(Math.max(word.startSec + 0.01, word.endSec).toFixed(3)),
+      }))
+      .sort((a, b) => a.startSec - b.startSec);
+
     const segments = rawChunks
       .map((chunk, idx) => {
         const text = String(chunk.text || "").trim();
         const start = Number(chunk.timestamp?.[0] ?? 0);
         const rawEnd = chunk.timestamp?.[1];
         const end = rawEnd !== null && rawEnd !== undefined ? Number(rawEnd) : Number((start + 4).toFixed(2));
+        const words = normalizedWords.filter(
+          (word) => word.endSec >= start && word.startSec <= end
+        );
         return {
           orderIndex: idx,
           startSec: Number(start.toFixed(2)),
-          endSec: Number(Math.max(start + 0.5, end).toFixed(2)),
+          endSec: Number(Math.max(start + 0.1, end).toFixed(2)),
           text,
+          words,
         };
       })
       .filter((seg) => seg.text.length > 0);
@@ -828,6 +853,7 @@ app.post("/api/projects/:id/analyze-audio", uploadAudioTrack.single("file"), asy
         startSec: 0,
         endSec: 8,
         text: String(whisperData.text).trim(),
+        words: normalizedWords,
       });
     }
 
@@ -1167,7 +1193,12 @@ app.post("/api/projects/:id/generate-storyboard", async (req: Request, res: Resp
       include: { character: true },
     });
 
-    let whisperSegments: Array<{ startSec: number; endSec: number; text: string }> = [];
+    let whisperSegments: Array<{
+      startSec: number;
+      endSec: number;
+      text: string;
+      words?: Array<{ text: string; startSec: number; endSec: number }>;
+    }> = [];
     try {
       const parsed = JSON.parse(project.lyricsJson || "[]");
       if (Array.isArray(parsed)) {
@@ -1176,6 +1207,28 @@ app.post("/api/projects/:id/generate-storyboard", async (req: Request, res: Resp
     } catch {
       whisperSegments = [];
     }
+
+    const timestampedWords = whisperSegments.flatMap((segment) => {
+      if (Array.isArray(segment.words) && segment.words.length > 0) {
+        return segment.words.map((word) => ({
+          text: String(word.text || "").trim(),
+          startSec: Number(word.startSec),
+          endSec: Number(word.endSec),
+        }));
+      }
+      // Backward compatibility for projects transcribed before word timestamps
+      // were stored: retain the old phrase's timing rather than losing lyrics.
+      return [{
+        text: String(segment.text || "").trim(),
+        startSec: Number(segment.startSec),
+        endSec: Number(segment.endSec),
+      }];
+    }).filter((word) =>
+      word.text.length > 0 &&
+      Number.isFinite(word.startSec) &&
+      Number.isFinite(word.endSec) &&
+      word.endSec >= word.startSec
+    ).sort((a, b) => a.startSec - b.startSec);
 
     const audioDuration = await getAudioDurationSec(project.audioPath);
     const whisperEnd =
@@ -1261,36 +1314,77 @@ app.post("/api/projects/:id/generate-storyboard", async (req: Request, res: Resp
 
     const styleGuidance = MUSIC_VIDEO_TYPE_DIRECTIONS[nextVideoType];
 
+    const shotWindowsByWindow = windows.map((win) => {
+      const winDur = win.end - win.start;
+      const targetShots = Math.max(1, Math.round(winDur / 4.5));
+      return Array.from({ length: targetShots }, (_, shotIndex) => {
+        const startSec = Number((win.start + (winDur * shotIndex) / targetShots).toFixed(3));
+        const endSec = Number((win.start + (winDur * (shotIndex + 1)) / targetShots).toFixed(3));
+        const lyricSegment = timestampedWords
+          .filter((word) => word.endSec > startSec && word.startSec < endSec)
+          .map((word) => word.text)
+          .join(" ")
+          .trim();
+        return {
+          startSec,
+          endSec,
+          lyricSegment: lyricSegment || "Instrumental performance",
+        };
+      });
+    });
+    const allShotWindows = shotWindowsByWindow.flat();
+
     const chunkResults = await Promise.all(
       windows.map(async (win) => {
         const winDur = Number((win.end - win.start).toFixed(1));
-        const targetShots = Math.max(1, Math.round(winDur / 4.5));
+        const shotWindows = shotWindowsByWindow[win.index] || [];
+        const targetShots = shotWindows.length;
         const localSegments = whisperSegments.filter(
-          (seg) => Number(seg.endSec) >= win.start - 1 && Number(seg.startSec) <= win.end + 1
+          (seg) => Number(seg.endSec) > win.start && Number(seg.startSec) < win.end
         );
 
-        const systemPrompt = `You are an elite Music Video Director directing Act ${win.index + 1} of ${windows.length} (${win.start}s to ${win.end}s of a ${songDurationSec}s song, ${scopeMode === "section" ? "selected song section" : "full song"}).
+        const systemPrompt = `You are an award-winning, bold music-video cinematographer and lyric-first visual storyteller directing Act ${win.index + 1} of ${windows.length} (${win.start}s-${win.end}s of a ${songDurationSec}s song).
 ${styleGuidance}
-Create exactly ${targetShots} consecutive Scene rows covering ${win.start}s to ${win.end}s with ZERO time gaps.
-Rules:
-1. Every scene MUST have duration between 4.0 and 5.5 seconds, consecutive with zero gaps: scene[0].startSec = ${win.start}, scene[i].startSec = scene[i-1].endSec, final scene endSec = ${win.end}.
-2. Follow the Music Video Style above when choosing shotType: "lipsync" vs "broll".
-3. Alternate camera framing every shot in rotation: Wide, Close-Up, Low Angle, Tracking.
-4. Output TWO strictly separated prompts per scene (concise, vivid, 1-2 sentences each):
-   - imagePrompt: Describe subject (matching Character visualPrompt), outfit, lighting, environment, and 35mm cinema film look matching the chosen style. NO camera movement words (never write pan, zoom, dolly, tracking, tilt, crane, orbit, handheld, push-in, pull-back).
-   - motionPrompt: Pure camera movement and subject motion only (include the framing style).`;
+
+DIRECTOR'S BRIEF
+Create exactly ${targetShots} shots. The supplied shotWindows are authoritative: use each shot's exact startSec, endSec, and lyricSegment. They are consecutive, cover the complete act, and have no gaps.
+For EVERY shot, translate the exact words sung in that timestamp window into a literal, filmable visual idea. Identify the lyrics' concrete nouns, verbs, objects, places, relationships, stakes, and emotional temperature; show those specific things happening on screen. Do not merely restate the mood. Do not recycle the same generic performance scene. If a shot window contains words, its lyricSegment must contain those exact words in their original order. Use "Instrumental performance" only when the supplied shot window has no words.
+
+VISUAL CONCEPT
+Use the user's Visual Concept when it is non-empty. If it is blank, invent a distinctive concept from the song title, artist description, music-video style, and the actual lyrics. Do NOT default to a nocturnal city, alley, street, club, or generic cinematic mood. Make each scene's location and visual metaphor earn its place from the lyric.
+
+HARD BANS
+Never use or paraphrase these tired AI-video clichés: "dimly lit urban alley", "wet cobblestones", "neon lights", "contemplative expression", "standing in the dim light", "static position", or "gently swaying". Also avoid generic rain-soaked streets, anonymous smoke-filled rooms, random city skylines, empty staring, and vague "cinematic atmosphere" in place of a lyric-specific event.
+
+SHOT VARIETY — REQUIRED
+Aggressively vary consecutive shots. Rotate the supplied framing values Wide, Close-Up, Low Angle, and Tracking, and make their visual scale unmistakable:
+- Wide: monumental wide architectural silhouette, landscape-scale composition, or tiny figure against a consequential environment.
+- Close-Up: extreme macro insert of a lyric-specific object/detail OR tight facial close-up capturing a precise raw emotion.
+- Low Angle: Dutch-angle low hero shot with a forceful physical gesture or consequential action.
+- Tracking: kinetic lateral/low tracking composition with foreground parallax and a clear moving subject.
+Never repeat the same shot scale, composition, setting, lighting setup, or central action in adjacent shots.
+
+MOTIVATED LIGHT AND CAMERA
+Choose lighting that dramatizes the actual lyric: headlights cutting through dust or smoke, sodium-vapor amber against cold steel blue, harsh direct flash, welding sparks, dashboard glow, hard noon sun, projector flicker, sunrise edge light, or another motivated source. Do not use neon.
+For B-roll motionPrompt, write specific kinetic camera choreography: crash zooms, whip pans, low-angle tracking pushes, fast orbit reveals, handheld impact shake, snap reframes, or aggressive rack-focus moves, tied to the action in the lyric. For lipsync shots, keep the artist's face and upper body cleanly framed and readable; use controlled dolly or restrained push with stable facial framing, never chaotic shake across the mouth.
+Each imagePrompt describes a single coherent still frame: artist/subject identity, lyric-specific action and objects, wardrobe, motivated lighting, environment, composition, and tactile film detail. Do not put camera-motion instructions in imagePrompt. Each motionPrompt describes movement only.
+
+Return the exact JSON schema requested. Do not add keys, markdown, commentary, or prose.`;
 
         const userPayload = {
-          title: project.title,
+          songTitle: project.title,
+          artistDescription: charProfile.visualPrompt,
+          artist: charProfile,
+          musicVideoStyle: nextVideoType,
+          musicVideoStyleGuidance: styleGuidance,
           aspectRatio: project.aspectRatio,
-          musicVideoType: nextVideoType,
           scopeMode,
           windowStartSec: win.start,
           windowEndSec: win.end,
           targetShotCount: targetShots,
-          visualConcept: concept || "Moody nocturnal cinematic music video",
-          character: charProfile,
-          fullRawLyrics: rawLyrics || "Instrumental performance",
+          visualConcept: concept || null,
+          fullRawLyrics: rawLyrics || null,
+          shotWindows,
           windowWhisperSegments: localSegments,
         };
 
@@ -1343,10 +1437,11 @@ Rules:
     let cursor = rangeStart;
     for (let i = 0; i < rawScenes.length; i++) {
       const item = rawScenes[i];
+      const plannedWindow = allShotWindows[i];
       const rawDur = Number(item.endSec) - Number(item.startSec);
-      const clampedDur = Number(Math.min(5.5, Math.max(4.0, Number.isFinite(rawDur) ? rawDur : 4.5)).toFixed(2));
-      const startSec = Number(cursor.toFixed(2));
-      const endSec = Number((cursor + clampedDur).toFixed(2));
+      const fallbackDuration = Number(Math.min(5.5, Math.max(4.0, Number.isFinite(rawDur) ? rawDur : 4.5)).toFixed(2));
+      const startSec = Number((plannedWindow?.startSec ?? cursor).toFixed(2));
+      const endSec = Number((plannedWindow?.endSec ?? (startSec + fallbackDuration)).toFixed(2));
       cursor = endSec;
 
       const framing = DIRECTOR_FRAMINGS[i % DIRECTOR_FRAMINGS.length];
@@ -1362,7 +1457,9 @@ Rules:
           orderIndex: i,
           startSec,
           endSec,
-          lyricSegment: String(item.lyricSegment || "").trim(),
+          // Use word timestamps for the actual shot window, not GPT's paraphrase
+          // or an entire multi-minute Whisper segment.
+          lyricSegment: plannedWindow?.lyricSegment || "Instrumental performance",
           shotType,
           imagePrompt: String(item.imagePrompt || "").trim(),
           motionPrompt: motionWithFraming,
