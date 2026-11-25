@@ -1183,7 +1183,7 @@ app.post("/api/projects/:id/generate-storyboard", async (req: Request, res: Resp
 
     const existingProject = await prisma.project.findUnique({
       where: { id },
-      include: { character: true },
+      include: { character: true, ...projectCastInclude },
     });
     if (!existingProject) {
       res.status(404).json({ error: "Project not found." });
@@ -1201,12 +1201,16 @@ app.post("/api/projects/:id/generate-storyboard", async (req: Request, res: Resp
       req.body?.videoType !== undefined
         ? normalizeVideoType(req.body.videoType)
         : normalizeVideoType(existingProject.videoType);
-    const nextCharacterId =
+    const nextCastMembers = req.body?.castMembers !== undefined
+      ? normalizeCastInput(req.body.castMembers, req.body?.characterId)
+      : (existingProject.castMembers || []).map((entry: any) => ({
+          artistId: entry.artistId, role: entry.role, appearanceNotes: entry.appearanceNotes, sortOrder: entry.sortOrder,
+        }));
+    const nextCharacterId = nextCastMembers[0]?.artistId || (
       req.body?.characterId !== undefined
-        ? req.body.characterId
-          ? String(req.body.characterId)
-          : null
-        : existingProject.characterId;
+        ? (req.body.characterId ? String(req.body.characterId) : null)
+        : existingProject.characterId
+    );
 
     const project = await prisma.project.update({
       where: { id },
@@ -1320,6 +1324,7 @@ app.post("/api/projects/:id/generate-storyboard", async (req: Request, res: Resp
                 "framing",
                 "imagePrompt",
                 "motionPrompt",
+                "castArtistIds",
               ],
               properties: {
                 startSec: { type: "number" },
@@ -1329,6 +1334,7 @@ app.post("/api/projects/:id/generate-storyboard", async (req: Request, res: Resp
                 framing: { type: "string", enum: ["Wide", "Close-Up", "Low Angle", "Tracking"] },
                 imagePrompt: { type: "string" },
                 motionPrompt: { type: "string" },
+                castArtistIds: { type: "array", items: { type: "string" }, maxItems: 4 },
               },
             },
           },
@@ -1336,9 +1342,19 @@ app.post("/api/projects/:id/generate-storyboard", async (req: Request, res: Resp
       },
     } as const;
 
-    const charProfile = project.character
-      ? { name: project.character.name, visualPrompt: project.character.visualPrompt }
-      : { name: "Lead Vocalist", visualPrompt: "Expressive performing singer in stylish evening wardrobe" };
+    const castProfiles = (project.castMembers || []).length
+      ? project.castMembers.map((entry: any) => ({
+          artistId: entry.artistId, name: entry.artist.name, role: entry.role,
+          physicalDescription: entry.artist.visualPrompt,
+          outfitLock: entry.appearanceNotes || "Preserve the artist's reference portrait styling.",
+          referenceImageUrl: entry.artist.refImagePath, sortOrder: entry.sortOrder,
+        }))
+      : project.character
+        ? [{ artistId: project.character.id, name: project.character.name, role: "Lead Vocalist",
+             physicalDescription: project.character.visualPrompt, outfitLock: "Preserve reference portrait styling.",
+             referenceImageUrl: project.character.refImagePath, sortOrder: 1 }]
+        : [];
+    const charProfile = castProfiles[0] || { name: "Lead Vocalist", visualPrompt: "Expressive performing singer in stylish evening wardrobe" };
 
     const styleGuidance = MUSIC_VIDEO_TYPE_DIRECTIONS[nextVideoType];
 
@@ -1401,12 +1417,16 @@ Choose lighting that dramatizes the actual lyric: headlights cutting through dus
 For B-roll motionPrompt, write specific kinetic camera choreography: crash zooms, whip pans, low-angle tracking pushes, fast orbit reveals, handheld impact shake, snap reframes, or aggressive rack-focus moves, tied to the action in the lyric. For lipsync shots, keep the artist's face and upper body cleanly framed and readable; use controlled dolly or restrained push with stable facial framing, never chaotic shake across the mouth.
 Each imagePrompt describes a single coherent still frame: artist/subject identity, lyric-specific action and objects, wardrobe, motivated lighting, environment, composition, and tactile film detail. Do not put camera-motion instructions in imagePrompt. Each motionPrompt describes movement only.
 
+MULTI-ARTIST CAST LOCK — ABSOLUTE:
+Use only the supplied cast profiles. For every shot, return castArtistIds containing the exact artistId values for every cast member visibly appearing in that shot. Assign Lead Vocalist to main verses and choruses; Featured Artist to their feature/rap verse; Backup Vocalists to group/wide stage shots or backing-vocal moments; Co-Star / Love Interest only where lyrics and story call for them. A shot may include multiple IDs. Never invent, merge, swap, or duplicate identities. Every imagePrompt MUST name each appearing artist exactly, state their assigned role, physical description, and exact outfit lock. Preserve each artist's distinct face, hair, body, and wardrobe in every shot. If no artist should appear, return an empty castArtistIds array and describe a non-performer visual.
+
 Return the exact JSON schema requested. Do not add keys, markdown, commentary, or prose.`;
 
         const userPayload = {
           songTitle: project.title,
-          artistDescription: charProfile.visualPrompt,
+          artistDescription: charProfile.visualPrompt || charProfile.physicalDescription,
           artist: charProfile,
+          castMembers: castProfiles,
           musicVideoStyle: nextVideoType,
           musicVideoStyleGuidance: styleGuidance,
           aspectRatio: project.aspectRatio,
@@ -1447,6 +1467,7 @@ Return the exact JSON schema requested. Do not add keys, markdown, commentary, o
             framing: string;
             imagePrompt: string;
             motionPrompt: string;
+            castArtistIds: string[];
           }>;
         };
         return Array.isArray(parsed.scenes) ? parsed.scenes : [];
@@ -1495,6 +1516,11 @@ Return the exact JSON schema requested. Do not add keys, markdown, commentary, o
           shotType,
           imagePrompt: String(item.imagePrompt || "").trim(),
           motionPrompt: motionWithFraming,
+          castArtistIds: JSON.stringify(
+            Array.isArray(item.castArtistIds)
+              ? item.castArtistIds.filter((artistId) => castProfiles.some((cast: any) => cast.artistId === artistId)).slice(0, 4)
+              : (castProfiles[0] ? [castProfiles[0].artistId] : [])
+          ),
           status: "pending",
         },
       });
