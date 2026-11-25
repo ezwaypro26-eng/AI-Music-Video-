@@ -73,7 +73,7 @@ def _load_pipeline(model_name: str):
     image=image,
     gpu="A100-80GB",
     memory=131072,
-    timeout=900,
+    timeout=1800,
     startup_timeout=1800,
     scaledown_window=60,
     max_containers=1,
@@ -141,8 +141,8 @@ async def warmup(request: Request):
     return {"call_id": call.object_id, "status": "warming"}
 
 
-@web.post("/generate")
-async def generate(request: Request):
+@web.post("/submit")
+async def submit(request: Request):
     _authorize(request)
     payload = await request.json()
     model_name = str(payload.get("model") or "flux-dev")
@@ -150,24 +150,53 @@ async def generate(request: Request):
     width = int(payload.get("width") or 1024)
     height = int(payload.get("height") or 1024)
     reference = str(payload.get("reference_image_base64") or "")
-
     if not prompt:
         raise HTTPException(status_code=400, detail="An image prompt is required.")
     if model_name not in ("flux-dev", "flux-kontext"):
         raise HTTPException(status_code=400, detail="Unsupported FLUX model.")
     if model_name == "flux-kontext" and not reference:
         raise HTTPException(status_code=400, detail="FLUX Kontext requires a reference image.")
+    call = generate_image.spawn(model_name, prompt, width, height, reference)
+    return {"call_id": call.object_id, "status": "queued"}
 
+
+@web.get("/result/{call_id}")
+async def result(call_id: str, request: Request):
+    _authorize(request)
     try:
-        image_bytes = generate_image.remote(model_name, prompt, width, height, reference)
+        image_bytes = modal.FunctionCall.from_id(call_id).get(timeout=0)
+    except TimeoutError:
+        return {"call_id": call_id, "status": "running"}
+    except Exception as exc:
+        return {"call_id": call_id, "status": "failed", "detail": f"FLUX image generation failed: {exc}"}
+    if not isinstance(image_bytes, (bytes, bytearray)) or len(image_bytes) < 1024:
+        return {"call_id": call_id, "status": "failed", "detail": "FLUX completed without returning a valid PNG."}
+    return Response(content=bytes(image_bytes), media_type="image/png",
+                    headers={"Content-Disposition": 'inline; filename="flux-image.png"'})
+
+
+@web.post("/generate")
+async def generate(request: Request):
+    """Compatibility endpoint for older clients."""
+    _authorize(request)
+    payload = await request.json()
+    model_name = str(payload.get("model") or "flux-dev")
+    prompt = str(payload.get("prompt") or "").strip()
+    width = int(payload.get("width") or 1024)
+    height = int(payload.get("height") or 1024)
+    reference = str(payload.get("reference_image_base64") or "")
+    if not prompt:
+        raise HTTPException(status_code=400, detail="An image prompt is required.")
+    if model_name not in ("flux-dev", "flux-kontext"):
+        raise HTTPException(status_code=400, detail="Unsupported FLUX model.")
+    if model_name == "flux-kontext" and not reference:
+        raise HTTPException(status_code=400, detail="FLUX Kontext requires a reference image.")
+    call = generate_image.spawn(model_name, prompt, width, height, reference)
+    try:
+        image_bytes = modal.FunctionCall.from_id(call.object_id).get(timeout=1800)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"FLUX image generation failed: {exc}") from exc
-
-    return Response(
-        content=image_bytes,
-        media_type="image/png",
-        headers={"Content-Disposition": 'inline; filename="flux-image.png"'},
-    )
+    return Response(content=image_bytes, media_type="image/png")
 
 
 def _authorize(request: Request):
