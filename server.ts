@@ -583,7 +583,7 @@ app.get("/api/ezway/tracks", async (_req: Request, res: Response) => {
     url.searchParams.set("order", "created_at.desc");
     url.searchParams.set("limit", "250");
     const response = await fetch(url, {
-      headers: { apikey: key, authorization: `Bearer ${key}` },
+      headers: key.startsWith("sb_") ? { apikey: key } : { apikey: key, authorization: `Bearer ${key}` },
     });
     if (!response.ok) {
       const detail = await response.text();
@@ -624,7 +624,7 @@ app.post("/api/ezway/tracks/:id/audio-url", async (req: Request, res: Response) 
     lookupUrl.searchParams.set("select", "id,file_key");
     lookupUrl.searchParams.set("id", `eq.${trackId}`);
     lookupUrl.searchParams.set("limit", "1");
-    const lookup = await fetch(lookupUrl, { headers: { apikey: key, authorization: `Bearer ${key}` } });
+    const lookup = await fetch(lookupUrl, { headers: key.startsWith("sb_") ? { apikey: key } : { apikey: key, authorization: `Bearer ${key}` } });
     if (!lookup.ok) throw new Error(`Could not look up the selected EZway track (${lookup.status}).`);
     const found = await lookup.json() as Array<{ id: string; file_key: string | null }>;
     const objectKey = found[0]?.file_key;
@@ -636,7 +636,7 @@ app.post("/api/ezway/tracks/:id/audio-url", async (req: Request, res: Response) 
     const signUrl = `${EZWAY_SUPABASE_URL}/storage/v1/object/sign/${EZWAY_AUDIO_BUCKET}/${encodedKey}`;
     const signed = await fetch(signUrl, {
       method: "POST",
-      headers: { apikey: key, authorization: `Bearer ${key}`, "content-type": "application/json" },
+      headers: key.startsWith("sb_") ? { apikey: key, "content-type": "application/json" } : { apikey: key, authorization: `Bearer ${key}`, "content-type": "application/json" },
       body: JSON.stringify({ expiresIn: 600 }),
     });
     if (!signed.ok) {
