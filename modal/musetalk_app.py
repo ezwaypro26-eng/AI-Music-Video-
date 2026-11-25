@@ -146,7 +146,10 @@ def run_musetalk(video_b64: str, audio_b64: str, warmup_only: bool = False) -> b
         logger.exception("MuseTalk checkpoint download/setup failed.")
         raise
     if warmup_only:
-        # Start the GPU worker and ensure model weights are locally cached before a lip-sync job arrives.
+        # Start the GPU worker, initialize CUDA, and ensure weights are cached before a lip-sync job arrives.
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.init()
         return b""
     with tempfile.TemporaryDirectory(prefix="musetalk-job-") as job_dir:
         root = Path(job_dir)
