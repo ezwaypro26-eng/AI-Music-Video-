@@ -1200,13 +1200,13 @@ LIP-SYNC GATING IS STRICT and applies in every video mode, including Performance
 });
 
 // ---------- AI Director Storyboard (OpenAI gpt-4o Structured JSON) ----------
-const DIRECTOR_FRAMINGS = ["Wide", "Close-Up", "Low Angle", "Tracking"];
+const DIRECTOR_FRAMINGS = ["Wide", "Close-Up", "Medium Close-Up", "Low Angle", "Tracking"];
 
 const MUSIC_VIDEO_TYPE_DIRECTIONS: Record<MusicVideoType, string> = {
   narrative:
     "Style: Narrative + Performance. Blend cinematic story B-roll scenes (around 60%) with emotional lip-synced vocal performance shots on choruses and key hooks (around 40%).",
   performance:
-    "Style: Pure Performance / Lip-Sync Focus. Keep the artist front-and-center singing directly to camera (`shotType: 'lipsync'` for ~75-85% of shots) across moody studio, spotlight, or concert setups, using `broll` only for brief instrumental breathers.",
+    "Style: Performance-forward. Keep the artist front-and-center in studio, spotlight, or concert setups, but obey the strict framing-based lip-sync gate: only face-filling close-ups may be lipsync; wide, full-body, group, and over-the-shoulder performance coverage is always broll.",
   visualizer:
     "Style: Cinematic B-Roll / Visualizer. Focus heavily on atmospheric visual storytelling, mood, and environmental metaphors (`shotType: 'broll'` for ~85-90% of shots, saving `lipsync` only for 1-2 peak chorus moments).",
   hype:
@@ -1378,7 +1378,7 @@ app.post("/api/projects/:id/generate-storyboard", async (req: Request, res: Resp
                 endSec: { type: "number" },
                 lyricSegment: { type: "string" },
                 shotType: { type: "string", enum: ["lipsync", "broll"] },
-                framing: { type: "string", enum: ["Wide", "Close-Up", "Low Angle", "Tracking"] },
+                framing: { type: "string", enum: ["Wide", "Close-Up", "Medium Close-Up", "Low Angle", "Tracking"] },
                 imagePrompt: { type: "string" },
                 motionPrompt: { type: "string" },
                 castArtistIds: { type: "array", items: { type: "string" }, maxItems: 4 },
@@ -1460,6 +1460,9 @@ Aggressively vary consecutive shots. Rotate the supplied framing values Wide, Cl
 - Low Angle: Dutch-angle low hero shot with a forceful physical gesture or consequential action.
 - Tracking: kinetic lateral/low tracking composition with foreground parallax and a clear moving subject.
 Never repeat the same shot scale, composition, setting, lighting setup, or central action in adjacent shots.
+
+STRICT LIP-SYNC ELIGIBILITY — OVERRIDES EVERY STYLE DIRECTION ABOVE, INCLUDING PERFORMANCE MODE:
+Set shotType to "lipsync" ONLY when framing is "Close-Up" or "Medium Close-Up", one artist's face fills most of the frame, and the mouth is clearly visible for accurate lip animation. All Wide, full-body, group, backup-singer group, silhouette, Tracking, and over-the-shoulder shots MUST be shotType "broll". A performance scene is NOT automatically a lipsync scene. When uncertain, choose "broll". Never assign lipsync to a shot where the face is small, obscured, profile-distant, or shared with multiple people.
 
 MOTIVATED LIGHT AND CAMERA
 Choose lighting that dramatizes the actual lyric: headlights cutting through dust or smoke, sodium-vapor amber against cold steel blue, harsh direct flash, welding sparks, dashboard glow, hard noon sun, projector flicker, sunrise edge light, or another motivated source. Do not use neon.
@@ -1546,8 +1549,13 @@ Return the exact JSON schema requested. Do not add keys, markdown, commentary, o
       const endSec = Number((plannedWindow?.endSec ?? (startSec + fallbackDuration)).toFixed(2));
       cursor = endSec;
 
-      const framing = DIRECTOR_FRAMINGS[i % DIRECTOR_FRAMINGS.length];
-      const shotType = item.shotType === "lipsync" ? "lipsync" : "broll";
+      const framing = String(item.framing || DIRECTOR_FRAMINGS[i % DIRECTOR_FRAMINGS.length]);
+      const framingText = framing.toLowerCase();
+      const imagePromptText = String(item.imagePrompt || "").toLowerCase();
+      const excludedComposition = /(wide|full[- ]?body|group|over[- ]the[- ]shoulder|tracking|silhouette|establishing)/i.test(`${framingText} ${imagePromptText}`);
+      const closeFaceComposition = /(close[- ]?up|medium close)/i.test(framingText) &&
+        /(face|facial).{0,60}(fills|filling|dominates|occupies)|(fills|filling|dominates|occupies).{0,60}(frame|screen)|mouth.{0,35}(clearly visible|visible in frame)/i.test(imagePromptText);
+      const shotType = item.shotType === "lipsync" && closeFaceComposition && !excludedComposition ? "lipsync" : "broll";
       const assignedCastIds = Array.isArray(item.castArtistIds)
         ? item.castArtistIds.filter((artistId) => castProfiles.some((cast: any) => cast.artistId === artistId)).slice(0, 4)
         : (castProfiles[0] ? [castProfiles[0].artistId] : []);
