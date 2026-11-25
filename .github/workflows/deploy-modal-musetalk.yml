@@ -1,0 +1,45 @@
+name: Deploy MuseTalk to Modal
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "modal/musetalk_app.py"
+      - ".github/workflows/deploy-modal-musetalk.yml"
+
+jobs:
+  deploy-musetalk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Check MuseTalk service syntax
+        run: python -m py_compile modal/musetalk_app.py
+
+      - name: Install Modal
+        run: python -m pip install --upgrade modal fastapi
+
+      - name: Deploy MuseTalk service
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: modal deploy modal/musetalk_app.py
+
+      - name: Print MuseTalk service URL
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          python - <<'PY'
+          import modal
+          service = modal.Function.from_name("ai-music-creater-musetalk", "web_app")
+          print("MODAL_LIPSYNC_URL=" + str(service.get_web_url()))
+          PY
