@@ -6,7 +6,10 @@ on:
     branches:
       - main
     paths:
-      - "modal/**"
+      - "modal/demucs_app.py"
+      - "modal/whisper_app.py"
+      - "modal/ltx_app.py"
+      - "modal/flux_image_app.py"
       - "server.ts"
       - ".github/workflows/deploy-modal-ltx.yml"
 
