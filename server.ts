@@ -1566,12 +1566,16 @@ async function generateSceneWithProjectCast(params: {
     artist: { id: string; name: string; visualPrompt: string; refImagePath: string };
   }>;
   castArtistIds: string;
+  legacyArtist?: { id: string; name: string; visualPrompt: string; refImagePath: string } | null;
 }): Promise<string> {
+  const members = params.castMembers.length ? params.castMembers : params.legacyArtist ? [{
+    artistId: params.legacyArtist.id, role: "Lead Vocalist", appearanceNotes: null, artist: params.legacyArtist,
+  }] : [];
   let ids: string[] = [];
   try { ids = JSON.parse(params.castArtistIds || "[]"); } catch { ids = []; }
-  if (!ids.length && params.castMembers.length) ids = [params.castMembers[0].artistId];
-  const appearing = ids.map((id) => params.castMembers.find((entry) => entry.artistId === id)).filter(Boolean) as typeof params.castMembers;
-  const primary = appearing[0] || params.castMembers[0];
+  if (!ids.length && members.length) ids = [members[0].artistId];
+  const appearing = ids.map((id) => members.find((entry) => entry.artistId === id)).filter(Boolean) as typeof members;
+  const primary = appearing[0] || members[0];
   const lockedVisuals = appearing.map((entry) =>
     entry.artist.name + " — " + entry.role + ". Physical identity: " + entry.artist.visualPrompt +
     ". Outfit lock: " + (entry.appearanceNotes || "preserve styling from this artist's reference portrait") +
@@ -1625,6 +1629,7 @@ app.post("/api/projects/:id/generate-keyframes", async (req: Request, res: Respo
             lyricSegment: scene.lyricSegment,
             castMembers: project.castMembers || [],
             castArtistIds: scene.castArtistIds || "[]",
+            legacyArtist: project.character,
           });
           await prisma.scene.update({
             where: { id: scene.id },
@@ -1798,6 +1803,7 @@ app.post("/api/scenes/:id/generate-image", async (req: Request, res: Response) =
       lyricSegment: scene.lyricSegment,
       castMembers: scene.project.castMembers || [],
       castArtistIds: scene.castArtistIds || "[]",
+      legacyArtist: scene.project.character,
     });
 
     const updated = await prisma.scene.update({
