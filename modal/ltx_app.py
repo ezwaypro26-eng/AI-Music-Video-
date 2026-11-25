@@ -82,7 +82,7 @@ def _load_pipeline():
     volumes={"/cache": model_cache},
 )
 @modal.concurrent(max_inputs=1)
-def generate_video(image_b64: str, prompt: str, aspect_ratio: str = "16:9", seed: int = 42) -> bytes:
+def generate_video(image_b64: str, prompt: str, aspect_ratio: str = "16:9", seed: int = 42, warmup_only: bool = False) -> bytes:
     import torch
     from PIL import Image
     from diffusers.pipelines.ltx2.utils import DISTILLED_SIGMA_VALUES
@@ -94,6 +94,10 @@ def generate_video(image_b64: str, prompt: str, aspect_ratio: str = "16:9", seed
     generated_audio = None
     generator = None
     try:
+        if warmup_only:
+            _load_pipeline()
+            torch.cuda.empty_cache()
+            return b""
         raw = base64.b64decode(image_b64)
         source_image = Image.open(io.BytesIO(raw)).convert("RGB")
 
@@ -138,6 +142,13 @@ def generate_video(image_b64: str, prompt: str, aspect_ratio: str = "16:9", seed
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+
+
+@web.post("/warmup")
+async def warmup(request: Request):
+    _authorize(request)
+    call = generate_video.spawn("", "warmup", "16:9", 42, True)
+    return {"call_id": call.object_id, "status": "warming"}
 
 
 @web.get("/health")
