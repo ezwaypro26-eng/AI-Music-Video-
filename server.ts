@@ -4,6 +4,7 @@ import type { Request, Response } from "express";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
+import crypto from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import multer from "multer";
@@ -32,6 +33,32 @@ for (const dir of [CHARACTERS_DIR, SCENES_DIR, AUDIO_DIR, PROJECTS_DIR, RENDERS_
 
 app.use(express.json({ limit: "25mb" }));
 app.use(express.urlencoded({ extended: true, limit: "25mb" }));
+
+// Private single-owner access gate. Protects the app shell, static assets, and every API route.
+const nocturnePassword = process.env.NOCTURNE_ACCESS_PASSWORD?.trim();
+app.use((req: Request, res: Response, next) => {
+  if (!nocturnePassword) {
+    res.status(503).type("text").send("Nocturne is locked until NOCTURNE_ACCESS_PASSWORD is configured.");
+    return;
+  }
+  const header = req.headers.authorization || "";
+  const encoded = header.startsWith("Basic ") ? header.slice(6) : "";
+  let supplied = "";
+  try {
+    supplied = Buffer.from(encoded, "base64").toString("utf8").split(":").slice(1).join(":");
+  } catch {
+    supplied = "";
+  }
+  const expected = Buffer.from(nocturnePassword);
+  const actual = Buffer.from(supplied);
+  const valid = actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+  if (!valid) {
+    res.setHeader("WWW-Authenticate", 'Basic realm="Nocturne Studio", charset="UTF-8"');
+    res.status(401).type("text").send("Sign in to your private Nocturne Studio.");
+    return;
+  }
+  next();
+});
 
 // Serve generated & uploaded assets immediately from public/
 app.use(express.static(PUBLIC_DIR));
@@ -531,6 +558,100 @@ app.get("/api/capabilities", async (_req: Request, res: Response) => {
     openaiConfigured: Boolean(getOpenAiKey()),
     ffmpegAvailable: hasFfmpeg,
   });
+});
+
+
+const EZWAY_SUPABASE_URL = "https://cdvfxkefhcqmifnddvza.supabase.co";
+const EZWAY_AUDIO_BUCKET = "ezway-media";
+
+function getEzwayServiceKey(): string | null {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  return key || null;
+}
+
+// Read-only bridge: Nocturne reads the existing EZway catalog; it never inserts or updates EZway rows.
+app.get("/api/ezway/tracks", async (_req: Request, res: Response) => {
+  const key = getEzwayServiceKey();
+  if (!key) {
+    res.status(503).json({ error: "EZway library connection is not configured. Add SUPABASE_SERVICE_ROLE_KEY in Render." });
+    return;
+  }
+  try {
+    const url = new URL("/rest/v1/tracks", EZWAY_SUPABASE_URL);
+    url.searchParams.set("select", "id,name,artist,duration,bpm,key_signature,lyrics,status,file_key");
+    url.searchParams.set("status", "eq.ready");
+    url.searchParams.set("order", "created_at.desc");
+    url.searchParams.set("limit", "250");
+    const response = await fetch(url, {
+      headers: { apikey: key, authorization: `Bearer ${key}` },
+    });
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(`EZway catalog request failed (${response.status}): ${detail.slice(0, 300)}`);
+    }
+    const rows = await response.json() as Array<{
+      id: string; name: string; artist: string | null; duration: number | null;
+      bpm: number | null; key_signature: string | null; lyrics: string | null;
+      status: string; file_key: string | null;
+    }>;
+    res.setHeader("Cache-Control", "private, no-store");
+    res.json({
+      tracks: rows.map(({ file_key, ...track }) => ({
+        ...track,
+        hasAudio: Boolean(file_key),
+        hasLyrics: Boolean(track.lyrics?.trim()),
+      })),
+    });
+  } catch (err) {
+    console.error("GET /api/ezway/tracks failed:", err);
+    res.status(502).json({ error: err instanceof Error ? err.message : "Could not load EZway tracks." });
+  }
+});
+
+app.post("/api/ezway/tracks/:id/audio-url", async (req: Request, res: Response) => {
+  const key = getEzwayServiceKey();
+  if (!key) {
+    res.status(503).json({ error: "EZway library connection is not configured." });
+    return;
+  }
+  try {
+    const trackId = String(req.params.id || "");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(trackId)) {
+      res.status(400).json({ error: "Invalid EZway track ID." });
+      return;
+    }
+    const lookupUrl = new URL("/rest/v1/tracks", EZWAY_SUPABASE_URL);
+    lookupUrl.searchParams.set("select", "id,file_key");
+    lookupUrl.searchParams.set("id", `eq.${trackId}`);
+    lookupUrl.searchParams.set("limit", "1");
+    const lookup = await fetch(lookupUrl, { headers: { apikey: key, authorization: `Bearer ${key}` } });
+    if (!lookup.ok) throw new Error(`Could not look up the selected EZway track (${lookup.status}).`);
+    const found = await lookup.json() as Array<{ id: string; file_key: string | null }>;
+    const objectKey = found[0]?.file_key;
+    if (!objectKey || found[0]?.id !== trackId) {
+      res.status(404).json({ error: "This EZway track has no stored audio file." });
+      return;
+    }
+    const encodedKey = objectKey.split("/").map(encodeURIComponent).join("/");
+    const signUrl = `${EZWAY_SUPABASE_URL}/storage/v1/object/sign/${EZWAY_AUDIO_BUCKET}/${encodedKey}`;
+    const signed = await fetch(signUrl, {
+      method: "POST",
+      headers: { apikey: key, authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify({ expiresIn: 600 }),
+    });
+    if (!signed.ok) {
+      const detail = await signed.text();
+      throw new Error(`Could not create a private audio link (${signed.status}): ${detail.slice(0, 300)}`);
+    }
+    const result = await signed.json() as { signedURL?: string; signedUrl?: string };
+    const pathPart = result.signedURL || result.signedUrl;
+    if (!pathPart) throw new Error("Supabase did not return a signed audio URL.");
+    res.setHeader("Cache-Control", "private, no-store");
+    res.json({ audioUrl: new URL(pathPart, EZWAY_SUPABASE_URL).toString() });
+  } catch (err) {
+    console.error("POST /api/ezway/tracks/:id/audio-url failed:", err);
+    res.status(502).json({ error: err instanceof Error ? err.message : "Could not prepare EZway audio." });
+  }
 });
 
 // ---------- Artist Locker: Characters ----------
