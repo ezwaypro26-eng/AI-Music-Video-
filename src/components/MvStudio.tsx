@@ -663,7 +663,7 @@ export const MvStudio: React.FC<MvStudioProps> = ({
     setStatusNotice(null);
     setGeneratingKeyframes(true);
     setProcessingStage(
-      `Generating ${activeProject.scenes.length} consistent keyframes with 8 staggered FLUX requests and saving to public/projects/${activeProject.id}/...`
+      `Generating ${activeProject.scenes.length} consistent keyframes sequentially through the single FLUX GPU worker and saving to public/projects/${activeProject.id}/...`
     );
 
     try {
@@ -2337,7 +2337,7 @@ export const MvStudio: React.FC<MvStudioProps> = ({
                   )}
                 </p>
               </div>
-              <span className="text-xs text-zinc-400 font-mono shrink-0">8 parallel workers · 250ms stagger</span>
+              <span className="text-xs text-zinc-400 font-mono shrink-0">1 FLUX GPU worker · sequential keyframes</span>
             </div>
 
             <div className="space-y-2">
