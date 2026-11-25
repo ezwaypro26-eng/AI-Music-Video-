@@ -10,6 +10,16 @@ export interface Character {
   };
 }
 
+export interface ProjectCast {
+  id?: string;
+  projectId?: string;
+  artistId: string;
+  role: string;
+  appearanceNotes: string | null;
+  sortOrder: number;
+  artist?: Character;
+}
+
 export interface Scene {
   id: string;
   projectId: string;
@@ -20,6 +30,7 @@ export interface Scene {
   shotType: string;
   imagePrompt: string;
   motionPrompt: string;
+  castArtistIds?: string;
   imagePath: string | null;
   videoPath: string | null;
   status: string;
@@ -48,6 +59,7 @@ export interface Project {
   vocalStemPath: string | null;
   characterId: string | null;
   character: Character | null;
+  castMembers: ProjectCast[];
   finalVideoPath: string | null;
   status: string;
   createdAt: string;
