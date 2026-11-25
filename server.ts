@@ -687,6 +687,7 @@ app.post("/api/projects", async (req: Request, res: Response) => {
       },
       include: {
         character: true,
+        ...projectCastInclude,
         scenes: { orderBy: { orderIndex: "asc" } },
       },
     });
@@ -1142,6 +1143,7 @@ Return a JSON array where each element has:
       },
       include: {
         character: true,
+        ...projectCastInclude,
         scenes: { orderBy: { orderIndex: "asc" } },
       },
     });
@@ -1221,8 +1223,9 @@ app.post("/api/projects/:id/generate-storyboard", async (req: Request, res: Resp
         aspectRatio: nextAspectRatio,
         videoType: nextVideoType,
         characterId: nextCharacterId,
+        castMembers: { deleteMany: {}, create: nextCastMembers },
       },
-      include: { character: true },
+      include: { character: true, ...projectCastInclude },
     });
 
     let whisperSegments: Array<{
@@ -1354,7 +1357,9 @@ app.post("/api/projects/:id/generate-storyboard", async (req: Request, res: Resp
              physicalDescription: project.character.visualPrompt, outfitLock: "Preserve reference portrait styling.",
              referenceImageUrl: project.character.refImagePath, sortOrder: 1 }]
         : [];
-    const charProfile = castProfiles[0] || { name: "Lead Vocalist", visualPrompt: "Expressive performing singer in stylish evening wardrobe" };
+    const charProfile = castProfiles[0]
+      ? { ...castProfiles[0], visualPrompt: castProfiles[0].physicalDescription }
+      : { name: "Lead Vocalist", visualPrompt: "Expressive performing singer in stylish evening wardrobe" };
 
     const styleGuidance = MUSIC_VIDEO_TYPE_DIRECTIONS[nextVideoType];
 
