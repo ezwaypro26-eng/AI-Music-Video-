@@ -397,27 +397,43 @@ async function generateImageWithModalFlux(params: {
     referenceImageBase64 = fs.readFileSync(fullPath).toString("base64");
   }
 
-  const response = await fetch(`${config.url}/generate`, {
+  const submittedResponse = await fetch(`${config.url}/submit`, {
     method: "POST",
-    headers: {
-      authorization: `Bearer ${config.token}`,
-      "content-type": "application/json",
-    },
+    headers: { authorization: `Bearer ${config.token}`, "content-type": "application/json" },
     body: JSON.stringify({
-      model: params.model,
-      prompt: params.prompt,
-      width,
-      height,
+      model: params.model, prompt: params.prompt, width, height,
       reference_image_base64: referenceImageBase64,
     }),
   });
-
-  if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(`Modal FLUX image generation failed (${response.status}): ${detail.slice(0, 600)}`);
+  if (!submittedResponse.ok) {
+    const detail = await submittedResponse.text();
+    throw new Error(`Modal FLUX could not accept the keyframe (${submittedResponse.status}): ${detail.slice(0, 600)}`);
   }
+  const submitted = await submittedResponse.json() as { call_id?: string };
+  if (!submitted.call_id) throw new Error("Modal FLUX did not return a generation job ID.");
 
-  const imageBytes = Buffer.from(await response.arrayBuffer());
+  const deadline = Date.now() + 35 * 60 * 1000;
+  while (Date.now() < deadline) {
+    const resultResponse = await fetch(
+      `${config.url}/result/${encodeURIComponent(submitted.call_id)}`,
+      { headers: { authorization: `Bearer ${config.token}` } }
+    );
+    if (!resultResponse.ok) {
+      const detail = await resultResponse.text();
+      throw new Error(`Modal FLUX keyframe failed (${resultResponse.status}): ${detail.slice(0, 600)}`);
+    }
+    if ((resultResponse.headers.get("content-type") || "").includes("image/png")) {
+      const imageBytes = Buffer.from(await resultResponse.arrayBuffer());
+      if (imageBytes.length < 1024) throw new Error("Modal FLUX returned an empty or incomplete image.");
+      fs.mkdirSync(path.dirname(params.targetAbsPath), { recursive: true });
+      fs.writeFileSync(params.targetAbsPath, imageBytes);
+      return;
+    }
+    const status = await resultResponse.json() as { status?: string; detail?: string };
+    if (status.status === "failed") throw new Error(status.detail || "Modal FLUX keyframe generation failed.");
+    await sleep(3000);
+  }
+  throw new Error("Modal FLUX keyframe exceeded the 35-minute job window. Check Modal logs before retrying.");
   if (imageBytes.length < 1024) throw new Error("Modal FLUX returned an empty or incomplete image.");
   fs.mkdirSync(path.dirname(params.targetAbsPath), { recursive: true });
   fs.writeFileSync(params.targetAbsPath, imageBytes);
@@ -1845,35 +1861,24 @@ app.post("/api/projects/:id/generate-keyframes", async (req: Request, res: Respo
       return;
     }
 
-    // Up to eight FLUX requests in flight, with 250ms staggered dispatch.
-    let nextKeyframeIndex = 0;
-    const keyframeWorkers = Array.from(
-      { length: Math.min(8, project.scenes.length) },
-      async (_, workerIndex) => {
-        if (workerIndex > 0) await sleep(workerIndex * 250);
-        while (true) {
-          const index = nextKeyframeIndex++;
-          if (index >= project.scenes.length) break;
-          const scene = project.scenes[index];
-          const imagePath = await generateSceneWithProjectCast({
-            projectId: project.id,
-            orderIndex: scene.orderIndex,
-            aspectRatio: project.aspectRatio,
-            imagePrompt: scene.imagePrompt,
-            lyricSegment: scene.lyricSegment,
-            castMembers: project.castMembers || [],
-            castArtistIds: scene.castArtistIds || "[]",
-            legacyArtist: project.character,
-          });
-          await prisma.scene.update({
-            where: { id: scene.id },
-            data: { imagePath, status: "ready" },
-          });
-          await sleep(250);
-        }
-      }
-    );
-    await Promise.all(keyframeWorkers);
+    // FLUX runs on one A100 container; process one keyframe at a time
+    // to avoid queuing simultaneous model calls against the same GPU.
+    for (const scene of project.scenes) {
+      const imagePath = await generateSceneWithProjectCast({
+        projectId: project.id,
+        orderIndex: scene.orderIndex,
+        aspectRatio: project.aspectRatio,
+        imagePrompt: scene.imagePrompt,
+        lyricSegment: scene.lyricSegment,
+        castMembers: project.castMembers || [],
+        castArtistIds: scene.castArtistIds || "[]",
+        legacyArtist: project.character,
+      });
+      await prisma.scene.update({
+        where: { id: scene.id },
+        data: { imagePath, status: "ready" },
+      });
+    }
 
     const updated = await prisma.project.update({
       where: { id },
