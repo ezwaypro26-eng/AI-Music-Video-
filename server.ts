@@ -654,6 +654,53 @@ app.post("/api/ezway/tracks/:id/audio-url", async (req: Request, res: Response) 
   }
 });
 
+
+app.get("/api/ezway/tracks/:id/audio", async (req: Request, res: Response) => {
+  const key = getEzwayServiceKey();
+  if (!key) {
+    res.status(503).json({ error: "EZway library connection is not configured." });
+    return;
+  }
+  try {
+    const trackId = String(req.params.id || "");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(trackId)) {
+      res.status(400).json({ error: "Invalid EZway track ID." });
+      return;
+    }
+    const lookupUrl = new URL("/rest/v1/tracks", EZWAY_SUPABASE_URL);
+    lookupUrl.searchParams.set("select", "id,file_key");
+    lookupUrl.searchParams.set("id", `eq.${trackId}`);
+    lookupUrl.searchParams.set("limit", "1");
+    const authHeaders = key.startsWith("sb_")
+      ? { apikey: key }
+      : { apikey: key, authorization: `Bearer ${key}` };
+    const lookup = await fetch(lookupUrl, { headers: authHeaders });
+    if (!lookup.ok) throw new Error(`Could not look up the selected EZway track (${lookup.status}).`);
+    const found = await lookup.json() as Array<{ id: string; file_key: string | null }>;
+    const objectKey = found[0]?.file_key;
+    if (!objectKey || found[0]?.id !== trackId) {
+      res.status(404).json({ error: "This EZway track has no stored audio file." });
+      return;
+    }
+    const encodedKey = objectKey.split("/").map(encodeURIComponent).join("/");
+    const objectUrl = `${EZWAY_SUPABASE_URL}/storage/v1/object/${EZWAY_AUDIO_BUCKET}/${encodedKey}`;
+    const audio = await fetch(objectUrl, { headers: authHeaders });
+    if (!audio.ok) {
+      const detail = await audio.text();
+      throw new Error(`EZway audio download failed (${audio.status}): ${detail.slice(0, 300)}`);
+    }
+    const bytes = Buffer.from(await audio.arrayBuffer());
+    if (!bytes.length) throw new Error("EZway returned an empty audio file.");
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("Content-Type", audio.headers.get("content-type") || "audio/mpeg");
+    res.setHeader("Content-Length", String(bytes.length));
+    res.status(200).send(bytes);
+  } catch (err) {
+    console.error("GET /api/ezway/tracks/:id/audio failed:", err);
+    res.status(502).json({ error: err instanceof Error ? err.message : "Could not download the selected EZway audio." });
+  }
+});
+
 // ---------- Artist Locker: Characters ----------
 app.get("/api/characters", async (_req: Request, res: Response) => {
   try {
