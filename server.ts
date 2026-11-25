@@ -2573,6 +2573,7 @@ async function ensureSqliteSchema() {
       "shotType" TEXT NOT NULL DEFAULT 'Medium Close-Up',
       "imagePrompt" TEXT NOT NULL DEFAULT '',
       "motionPrompt" TEXT NOT NULL DEFAULT '',
+      "castArtistIds" TEXT NOT NULL DEFAULT '[]',
       "imagePath" TEXT,
       "videoPath" TEXT,
       "status" TEXT NOT NULL DEFAULT 'pending',
@@ -2581,6 +2582,27 @@ async function ensureSqliteSchema() {
       CONSTRAINT "Scene_projectId_fkey" FOREIGN KEY ("projectId") REFERENCES "Project" ("id") ON DELETE CASCADE ON UPDATE CASCADE
     );
   `);
+  const sceneCols = (await prisma.$queryRawUnsafe(`PRAGMA table_info("Scene");`)) as Array<{ name: string }>;
+  if (!sceneCols.some((c) => c.name === "castArtistIds")) {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "Scene" ADD COLUMN "castArtistIds" TEXT NOT NULL DEFAULT '[]';`);
+  }
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "ProjectCast" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "projectId" TEXT NOT NULL,
+      "artistId" TEXT NOT NULL,
+      "role" TEXT NOT NULL DEFAULT 'Lead Vocalist',
+      "appearanceNotes" TEXT,
+      "sortOrder" INTEGER NOT NULL DEFAULT 1,
+      "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" DATETIME NOT NULL,
+      CONSTRAINT "ProjectCast_projectId_fkey" FOREIGN KEY ("projectId") REFERENCES "Project" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+      CONSTRAINT "ProjectCast_artistId_fkey" FOREIGN KEY ("artistId") REFERENCES "Character" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    );
+  `);
+  await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "ProjectCast_projectId_artistId_key" ON "ProjectCast"("projectId", "artistId");`);
+  await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "ProjectCast_projectId_sortOrder_key" ON "ProjectCast"("projectId", "sortOrder");`);
+  await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "ProjectCast_artistId_idx" ON "ProjectCast"("artistId");`);
 }
 
 // ---------- Vite Dev Middleware or Static Prod Serving ----------
