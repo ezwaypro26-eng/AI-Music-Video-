@@ -1508,6 +1508,17 @@ Return the exact JSON schema requested. Do not add keys, markdown, commentary, o
 
       const framing = DIRECTOR_FRAMINGS[i % DIRECTOR_FRAMINGS.length];
       const shotType = item.shotType === "lipsync" ? "lipsync" : "broll";
+      const assignedCastIds = Array.isArray(item.castArtistIds)
+        ? item.castArtistIds.filter((artistId) => castProfiles.some((cast: any) => cast.artistId === artistId)).slice(0, 4)
+        : (castProfiles[0] ? [castProfiles[0].artistId] : []);
+      const enforcedCastLock = assignedCastIds.map((artistId) => {
+        const cast: any = castProfiles.find((entry: any) => entry.artistId === artistId);
+        return cast ? cast.name + " (" + cast.role + "); physical description: " + cast.physicalDescription +
+          "; exact outfit lock: " + cast.outfitLock : "";
+      }).filter(Boolean).join(" | ");
+      const enforcedImagePrompt = String(item.imagePrompt || "").trim() +
+        (enforcedCastLock ? " CAST IDENTITY AND WARDROBE LOCK — " + enforcedCastLock +
+          ". Keep each named artist's face, hair, body, and outfit distinct and unchanged; never swap identities or wardrobe." : "");
       const motionText = String(item.motionPrompt || "").trim();
       const motionWithFraming = motionText.toLowerCase().includes(framing.toLowerCase())
         ? motionText
@@ -1523,13 +1534,9 @@ Return the exact JSON schema requested. Do not add keys, markdown, commentary, o
           // or an entire multi-minute Whisper segment.
           lyricSegment: plannedWindow?.lyricSegment || "Instrumental performance",
           shotType,
-          imagePrompt: String(item.imagePrompt || "").trim(),
+          imagePrompt: enforcedImagePrompt,
           motionPrompt: motionWithFraming,
-          castArtistIds: JSON.stringify(
-            Array.isArray(item.castArtistIds)
-              ? item.castArtistIds.filter((artistId) => castProfiles.some((cast: any) => cast.artistId === artistId)).slice(0, 4)
-              : (castProfiles[0] ? [castProfiles[0].artistId] : [])
-          ),
+          castArtistIds: JSON.stringify(assignedCastIds),
           status: "pending",
         },
       });
