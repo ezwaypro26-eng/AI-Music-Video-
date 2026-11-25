@@ -2025,11 +2025,17 @@ export const MvStudio: React.FC<MvStudioProps> = ({
                         <div className="space-y-1.5">
                           <label className="text-[11px] font-medium text-zinc-400">Cast assigned to this shot · choose up to 4</label>
                           <select
-                            multiple
-                            value={readCastIds(String(draft.castArtistIds ?? scene.castArtistIds ?? JSON.stringify(castDraft[0] ? [castDraft[0].artistId] : [])))}
-                            onChange={(e) => updateDraft(scene.id, { castArtistIds: JSON.stringify(Array.from(e.target.selectedOptions).map((option) => option.value).slice(0, 4)) })}
-                            className="w-full min-h-[64px] rounded-xl bg-zinc-950 border border-zinc-800 p-2 text-xs text-zinc-100"
+                            value=""
+                            onChange={(e) => {
+                              const id = e.target.value;
+                              if (!id) return;
+                              const currentIds = readCastIds(String(draft.castArtistIds ?? scene.castArtistIds ?? JSON.stringify(castDraft[0] ? [castDraft[0].artistId] : [])));
+                              const nextIds = currentIds.includes(id) ? currentIds.filter((item) => item !== id) : [...currentIds, id].slice(0, 4);
+                              updateDraft(scene.id, { castArtistIds: JSON.stringify(nextIds) });
+                            }}
+                            className="w-full min-h-[44px] rounded-xl bg-zinc-950 border border-zinc-800 px-3 py-2 text-xs text-zinc-100"
                           >
+                            <option value="">Add / remove artist from this shot…</option>
                             {castDraft.map((entry) => {
                               const artist = characters.find((item) => item.id === entry.artistId);
                               return artist ? <option key={entry.artistId} value={entry.artistId}>{artist.name} · {entry.role}</option> : null;
