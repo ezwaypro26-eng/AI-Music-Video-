@@ -10,7 +10,6 @@ on:
       - "modal/whisper_app.py"
       - "modal/ltx_app.py"
       - "modal/flux_image_app.py"
-      - "server.ts"
       - ".github/workflows/deploy-modal-ltx.yml"
 
 jobs:
