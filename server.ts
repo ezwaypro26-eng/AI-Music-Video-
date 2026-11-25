@@ -726,6 +726,7 @@ app.patch("/api/projects/:id", async (req: Request, res: Response) => {
       data,
       include: {
         character: true,
+        ...projectCastInclude,
         scenes: { orderBy: { orderIndex: "asc" } },
       },
     });
@@ -816,6 +817,7 @@ app.post("/api/projects/:id/analyze-audio", uploadAudioTrack.single("file"), asy
       },
       include: {
         character: true,
+        ...projectCastInclude,
         scenes: { orderBy: { orderIndex: "asc" } },
       },
     });
@@ -899,6 +901,7 @@ app.post("/api/projects/:id/analyze-audio", uploadAudioTrack.single("file"), asy
       },
       include: {
         character: true,
+        ...projectCastInclude,
         scenes: { orderBy: { orderIndex: "asc" } },
       },
     });
@@ -948,6 +951,7 @@ app.post("/api/projects/:id/audio", uploadAudioTrack.single("file"), async (req:
       data: kind === "vocalStem" ? { vocalStemPath: relPath } : { audioPath: relPath },
       include: {
         character: true,
+        ...projectCastInclude,
         scenes: { orderBy: { orderIndex: "asc" } },
       },
     });
@@ -1538,6 +1542,7 @@ Return the exact JSON schema requested. Do not add keys, markdown, commentary, o
       },
       include: {
         character: true,
+        ...projectCastInclude,
         scenes: { orderBy: { orderIndex: "asc" } },
       },
     });
@@ -1593,6 +1598,7 @@ app.post("/api/projects/:id/generate-keyframes", async (req: Request, res: Respo
       where: { id },
       include: {
         character: true,
+        ...projectCastInclude,
         scenes: { orderBy: { orderIndex: "asc" } },
       },
     });
@@ -1633,6 +1639,7 @@ app.post("/api/projects/:id/generate-keyframes", async (req: Request, res: Respo
       data: { status: "keyframes_ready" },
       include: {
         character: true,
+        ...projectCastInclude,
         scenes: { orderBy: { orderIndex: "asc" } },
       },
     });
@@ -1840,6 +1847,7 @@ async function runRenderPipeline(
       where: { id: projectId },
       include: {
         character: true,
+        ...projectCastInclude,
         scenes: { orderBy: { orderIndex: "asc" } },
       },
     });
@@ -2167,6 +2175,7 @@ app.post("/api/projects/:id/render", async (req: Request, res: Response) => {
       where: { id },
       include: {
         character: true,
+        ...projectCastInclude,
         scenes: { orderBy: { orderIndex: "asc" } },
       },
     });
@@ -2236,6 +2245,7 @@ app.get("/api/projects/:id/render-status", async (req: Request, res: Response) =
       where: { id },
       include: {
         character: true,
+        ...projectCastInclude,
         scenes: { orderBy: { orderIndex: "asc" } },
       },
     });
