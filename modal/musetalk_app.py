@@ -137,7 +137,7 @@ def _download_models() -> None:
     secrets=[service_secret],
     volumes={"/opt/MuseTalk/models": model_cache},
 )
-def run_musetalk(video_b64: str, audio_b64: str) -> bytes:
+def run_musetalk(video_b64: str, audio_b64: str, warmup_only: bool = False) -> bytes:
     import yaml
 
     try:
@@ -145,6 +145,9 @@ def run_musetalk(video_b64: str, audio_b64: str) -> bytes:
     except Exception:
         logger.exception("MuseTalk checkpoint download/setup failed.")
         raise
+    if warmup_only:
+        # Start the GPU worker and ensure model weights are locally cached before a lip-sync job arrives.
+        return b""
     with tempfile.TemporaryDirectory(prefix="musetalk-job-") as job_dir:
         root = Path(job_dir)
         video_path = root / "input.mp4"
@@ -203,6 +206,13 @@ def run_musetalk(video_b64: str, audio_b64: str) -> bytes:
 @web.get("/health")
 async def health():
     return {"ok": True, "model": "MuseTalk 1.5", "provider": "Hugging Face weights on Modal"}
+
+
+@web.post("/warmup")
+async def warmup(request: Request):
+    _authorize(request)
+    call = run_musetalk.spawn("", "", True)
+    return {"call_id": call.object_id, "status": "warming"}
 
 
 @web.post("/submit")
