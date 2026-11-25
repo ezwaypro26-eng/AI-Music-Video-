@@ -1,4 +1,5 @@
 import base64
+import logging
 import os
 import secrets
 import subprocess
@@ -13,6 +14,7 @@ from fastapi.responses import Response
 APP_NAME = "ai-music-creater-musetalk"
 REPO_DIR = "/opt/MuseTalk"
 MODEL_DIR = f"{REPO_DIR}/models"
+logger = logging.getLogger("musetalk")
 
 app = modal.App(APP_NAME)
 model_cache = modal.Volume.from_name("musetalk-model-cache", create_if_missing=True)
@@ -31,6 +33,23 @@ image = (
     .run_commands(
         "git clone --depth 1 https://github.com/TMElyralab/MuseTalk.git /opt/MuseTalk"
     )
+    .run_commands("""python - <<'PY'
+from pathlib import Path
+script = Path("/opt/MuseTalk/download_weights.sh")
+lines = script.read_text().splitlines()
+for index, line in enumerate(lines):
+    if line.startswith("curl -L https://download.pytorch.org/models/resnet18-5c106cde.pth"):
+        lines[index] = 'python -c "import urllib.request; urllib.request.urlretrieve(\'https://download.pytorch.org/models/resnet18-5c106cde.pth\', \'$CheckpointsDir/face-parse-bisent/resnet18-5c106cde.pth\')"'
+        if index + 1 < len(lines) and lines[index + 1].strip().startswith("-o $CheckpointsDir/face-parse-bisent/resnet18-5c106cde.pth"):
+            lines[index + 1] = ""
+        break
+else:
+    raise SystemExit("Expected upstream MuseTalk curl download line was not found; refusing an unverified build.")
+script.write_text("\n".join(lines) + "\n")
+if "curl -L https://download.pytorch.org/models/resnet18-5c106cde.pth" in script.read_text():
+    raise SystemExit("MuseTalk curl patch did not apply.")
+print("Patched upstream MuseTalk weight downloader: Python urllib replaces curl.")
+PY""")
     .run_commands(
         "cd /opt/MuseTalk && pip install -r requirements.txt",
         "cd /opt/MuseTalk && pip install --no-cache-dir -U openmim",
@@ -137,7 +156,11 @@ def _download_models() -> None:
 def run_musetalk(video_b64: str, audio_b64: str) -> bytes:
     import yaml
 
-    _download_models()
+    try:
+        _download_models()
+    except Exception:
+        logger.exception("MuseTalk checkpoint download/setup failed.")
+        raise
     with tempfile.TemporaryDirectory(prefix="musetalk-job-") as job_dir:
         root = Path(job_dir)
         video_path = root / "input.mp4"
@@ -173,16 +196,22 @@ def run_musetalk(video_b64: str, audio_b64: str) -> bytes:
             "--fps", "24",
             "--output_vid_name", "musetalk-output.mp4",
         ]
-        completed = subprocess.run(
-            command,
-            cwd=REPO_DIR,
-            capture_output=True,
-            text=True,
-            timeout=1650,
-        )
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=REPO_DIR,
+                capture_output=True,
+                text=True,
+                timeout=1650,
+            )
+        except Exception:
+            logger.exception("Could not launch MuseTalk inference process. Command: %r", command)
+            raise
+        logger.info("MuseTalk inference process exited with code %s.", completed.returncode)
         output_path = result_dir / "v15" / "musetalk-output.mp4"
         if completed.returncode != 0 or not output_path.exists() or output_path.stat().st_size < 1024:
             detail = (completed.stderr or completed.stdout or "MuseTalk did not create an output video.")[-6000:]
+            logger.error("MuseTalk inference failed. Exit code=%s; stdout tail=%s; stderr tail=%s", completed.returncode, (completed.stdout or "")[-3000:], (completed.stderr or "")[-3000:])
             raise RuntimeError(f"MuseTalk 1.5 inference failed: {detail}")
         return output_path.read_bytes()
 
@@ -214,6 +243,7 @@ async def result(call_id: str, request: Request):
     except TimeoutError:
         return {"call_id": call_id, "status": "running"}
     except Exception as exc:
+        logger.exception("MuseTalk result retrieval failed for Modal call %s.", call_id)
         raise HTTPException(status_code=500, detail=f"MuseTalk lip-sync failed: {exc}") from exc
     if not isinstance(video_bytes, (bytes, bytearray)) or len(video_bytes) < 1024:
         raise HTTPException(status_code=500, detail="MuseTalk completed without returning a valid MP4.")
