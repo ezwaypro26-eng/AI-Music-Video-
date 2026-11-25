@@ -1545,6 +1545,40 @@ Return the exact JSON schema requested. Do not add keys, markdown, commentary, o
   }
 });
 
+async function generateSceneWithProjectCast(params: {
+  projectId: string;
+  orderIndex: number;
+  aspectRatio: string;
+  imagePrompt: string;
+  lyricSegment: string;
+  castMembers: Array<{
+    artistId: string; role: string; appearanceNotes: string | null;
+    artist: { id: string; name: string; visualPrompt: string; refImagePath: string };
+  }>;
+  castArtistIds: string;
+}): Promise<string> {
+  let ids: string[] = [];
+  try { ids = JSON.parse(params.castArtistIds || "[]"); } catch { ids = []; }
+  if (!ids.length && params.castMembers.length) ids = [params.castMembers[0].artistId];
+  const appearing = ids.map((id) => params.castMembers.find((entry) => entry.artistId === id)).filter(Boolean) as typeof params.castMembers;
+  const primary = appearing[0] || params.castMembers[0];
+  const lockedVisuals = appearing.map((entry) =>
+    entry.artist.name + " — " + entry.role + ". Physical identity: " + entry.artist.visualPrompt +
+    ". Outfit lock: " + (entry.appearanceNotes || "preserve styling from this artist's reference portrait") +
+    ". Keep this person visually distinct; never transfer their face, hair, or clothing to another cast member."
+  ).join(" GROUP CAST LOCK: ");
+  return generateSceneKeyframeWithFlux({
+    projectId: params.projectId,
+    orderIndex: params.orderIndex,
+    aspectRatio: params.aspectRatio,
+    imagePrompt: (lockedVisuals ? "GROUP CAST LOCK: " + lockedVisuals + ". " : "") + params.imagePrompt,
+    lyricSegment: params.lyricSegment,
+    characterName: primary?.artist.name || null,
+    characterVisualPrompt: primary?.artist.visualPrompt || null,
+    characterRefPath: primary?.artist.refImagePath || null,
+  });
+}
+
 // ---------- Generate All Keyframes (Modal FLUX) ----------
 app.post("/api/projects/:id/generate-keyframes", async (req: Request, res: Response) => {
   const id = String(req.params.id);
@@ -1572,15 +1606,14 @@ app.post("/api/projects/:id/generate-keyframes", async (req: Request, res: Respo
       const batch = project.scenes.slice(i, i + batchSize);
       await Promise.all(
         batch.map(async (scene) => {
-          const imagePath = await generateSceneKeyframeWithFlux({
+          const imagePath = await generateSceneWithProjectCast({
             projectId: project.id,
             orderIndex: scene.orderIndex,
             aspectRatio: project.aspectRatio,
             imagePrompt: scene.imagePrompt,
             lyricSegment: scene.lyricSegment,
-            characterName: project.character?.name,
-            characterVisualPrompt: project.character?.visualPrompt,
-            characterRefPath: project.character?.refImagePath,
+            castMembers: project.castMembers || [],
+            castArtistIds: scene.castArtistIds || "[]",
           });
           await prisma.scene.update({
             where: { id: scene.id },
@@ -1738,22 +1771,21 @@ app.post("/api/scenes/:id/generate-image", async (req: Request, res: Response) =
     const id = String(req.params.id);
     const scene = await prisma.scene.findUnique({
       where: { id },
-      include: { project: { include: { character: true } } },
+      include: { project: { include: { character: true, ...projectCastInclude } } },
     });
     if (!scene) {
       res.status(404).json({ error: "Scene not found." });
       return;
     }
 
-    const imagePath = await generateSceneKeyframeWithFlux({
+    const imagePath = await generateSceneWithProjectCast({
       projectId: scene.projectId,
       orderIndex: scene.orderIndex,
       aspectRatio: scene.project.aspectRatio,
       imagePrompt: scene.imagePrompt,
       lyricSegment: scene.lyricSegment,
-      characterName: scene.project.character?.name,
-      characterVisualPrompt: scene.project.character?.visualPrompt,
-      characterRefPath: scene.project.character?.refImagePath,
+      castMembers: scene.project.castMembers || [],
+      castArtistIds: scene.castArtistIds || "[]",
     });
 
     const updated = await prisma.scene.update({
