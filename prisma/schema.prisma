@@ -15,6 +15,7 @@ model Character {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   projects     Project[]
+  castEntries  ProjectCast[]
 }
 
 model Project {
@@ -34,6 +35,7 @@ model Project {
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
   scenes         Scene[]
+  castMembers    ProjectCast[]
 }
 
 model Scene {
@@ -47,9 +49,27 @@ model Scene {
   shotType     String   @default("Medium Close-Up")
   imagePrompt  String   @default("")
   motionPrompt String   @default("")
+  castArtistIds String   @default("[]")
   imagePath    String?
   videoPath    String?
   status       String   @default("pending")
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+}
+
+model ProjectCast {
+  id              String   @id @default(cuid())
+  projectId       String
+  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  artistId        String
+  artist          Character @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  role            String   @default("Lead Vocalist")
+  appearanceNotes String?
+  sortOrder       Int      @default(1)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([projectId, artistId])
+  @@unique([projectId, sortOrder])
+  @@index([artistId])
 }
