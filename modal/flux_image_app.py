@@ -86,11 +86,17 @@ def generate_image(
     width: int,
     height: int,
     reference_image_base64: str = "",
+    warmup_only: bool = False,
 ) -> bytes:
     import torch
 
     if width < 256 or height < 256 or width > 1536 or height > 1536:
         raise ValueError("Image dimensions must be between 256 and 1536 pixels.")
+
+    if warmup_only:
+        _load_pipeline(model_name)
+        torch.cuda.empty_cache()
+        return b""
 
     if model_name == "flux-kontext":
         if not reference_image_base64:
@@ -126,6 +132,13 @@ def generate_image(
 @web.get("/health")
 async def health():
     return {"ok": True, "models": [FLUX_DEV_ID, FLUX_KONTEXT_ID]}
+
+
+@web.post("/warmup")
+async def warmup(request: Request):
+    _authorize(request)
+    call = generate_image.spawn("flux-kontext", "warmup", 512, 512, "", True)
+    return {"call_id": call.object_id, "status": "warming"}
 
 
 @web.post("/generate")
