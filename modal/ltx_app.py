@@ -140,6 +140,11 @@ def generate_video(image_b64: str, prompt: str, aspect_ratio: str = "16:9", seed
             torch.cuda.empty_cache()
 
 
+@web.get("/health")
+async def health():
+    return {"ok": True, "model": MODEL_ID, "provider": "Modal"}
+
+
 @web.post("/submit")
 async def submit(request: Request):
     _authorize(request)
