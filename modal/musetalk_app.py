@@ -33,23 +33,7 @@ image = (
     .run_commands(
         "git clone --depth 1 https://github.com/TMElyralab/MuseTalk.git /opt/MuseTalk"
     )
-    .run_commands("""python - <<'PY'
-from pathlib import Path
-script = Path("/opt/MuseTalk/download_weights.sh")
-lines = script.read_text().splitlines()
-for index, line in enumerate(lines):
-    if line.startswith("curl -L https://download.pytorch.org/models/resnet18-5c106cde.pth"):
-        lines[index] = 'python -c "import urllib.request; urllib.request.urlretrieve(\'https://download.pytorch.org/models/resnet18-5c106cde.pth\', \'$CheckpointsDir/face-parse-bisent/resnet18-5c106cde.pth\')"'
-        if index + 1 < len(lines) and lines[index + 1].strip().startswith("-o $CheckpointsDir/face-parse-bisent/resnet18-5c106cde.pth"):
-            lines[index + 1] = ""
-        break
-else:
-    raise SystemExit("Expected upstream MuseTalk curl download line was not found; refusing an unverified build.")
-script.write_text("\n".join(lines) + "\n")
-if "curl -L https://download.pytorch.org/models/resnet18-5c106cde.pth" in script.read_text():
-    raise SystemExit("MuseTalk curl patch did not apply.")
-print("Patched upstream MuseTalk weight downloader: Python urllib replaces curl.")
-PY""")
+    .run_commands("rm -f /opt/MuseTalk/download_weights.sh")
     .run_commands(
         "cd /opt/MuseTalk && pip install -r requirements.txt",
         "cd /opt/MuseTalk && pip install --no-cache-dir -U openmim",
