@@ -265,10 +265,11 @@ export const MvStudio: React.FC<MvStudioProps> = ({
       setNewTitle((current) => current.trim() || track.name);
       setNewRawLyrics(track.lyrics || "");
       if (track.hasAudio) {
-        const urlRes = await fetch(`/api/ezway/tracks/${encodeURIComponent(track.id)}/audio-url`, { method: "POST" });
-        const urlData = await urlRes.json();
-        if (!urlRes.ok) throw new Error(urlData.error || "Could not prepare this EZway audio.");
-        const audioRes = await fetch(urlData.audioUrl);
+        const audioRes = await fetch(`/api/ezway/tracks/${encodeURIComponent(track.id)}/audio`);
+        if (!audioRes.ok) {
+          const detail = await audioRes.json().catch(() => ({}));
+          throw new Error(detail.error || `Could not download the selected EZway track (${audioRes.status}).`);
+        }
         if (!audioRes.ok) throw new Error(`Could not download the selected EZway track (${audioRes.status}).`);
         const audioBlob = await audioRes.blob();
         const safeName = track.name.replace(/[^a-z0-9-_]+/gi, "_").replace(/^_+|_+$/g, "") || "ezway-track";
