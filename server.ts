@@ -1433,7 +1433,7 @@ Return the exact JSON schema requested. Do not add keys, markdown, commentary, o
 
         const userPayload = {
           songTitle: project.title,
-          artistDescription: charProfile.visualPrompt || charProfile.physicalDescription,
+          artistDescription: charProfile.visualPrompt,
           artist: charProfile,
           castMembers: castProfiles,
           musicVideoStyle: nextVideoType,
