@@ -84,7 +84,12 @@ export default function App() {
   const handleCharacterDeleted = (id: string) => {
     setCharacters((prev) => prev.filter((c) => c.id !== id));
     setProjects((prev) =>
-      prev.map((p) => (p.characterId === id ? { ...p, characterId: null, character: null } : p))
+      prev.map((p) => ({
+        ...p,
+        characterId: p.characterId === id ? null : p.characterId,
+        character: p.characterId === id ? null : p.character,
+        castMembers: (p.castMembers || []).filter((entry) => entry.artistId !== id),
+      }))
     );
   };
 
