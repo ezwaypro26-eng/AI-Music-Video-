@@ -94,11 +94,12 @@ export default function App() {
   };
 
   const handleCastInStudio = (character: Character) => {
+    // Casting from Artist Locker always starts a NEW project. Do not leave
+    // the user on an existing project when the project list is non-empty.
     setCastCharacterId(character.id);
+    setActiveProjectId(null);
+    setNewProjectOpen(true);
     setActiveTab("studio");
-    if (projects.length === 0) {
-      setNewProjectOpen(true);
-    }
   };
 
   const handleProjectCreated = (project: Project) => {
