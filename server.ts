@@ -625,6 +625,7 @@ app.get("/api/projects", async (_req: Request, res: Response) => {
       orderBy: { updatedAt: "desc" },
       include: {
         character: true,
+        ...projectCastInclude,
         scenes: { orderBy: { orderIndex: "asc" } },
       },
     });
@@ -643,6 +644,26 @@ function normalizeVideoType(val: unknown): MusicVideoType {
   return (VALID_VIDEO_TYPES as readonly string[]).includes(s) ? (s as MusicVideoType) : "narrative";
 }
 
+function normalizeCastInput(raw: unknown, legacyCharacterId?: unknown): Array<{ artistId: string; role: string; appearanceNotes: string | null; sortOrder: number }> {
+  const source = Array.isArray(raw) ? raw : legacyCharacterId ? [{ artistId: legacyCharacterId, role: "Lead Vocalist" }] : [];
+  if (source.length > 4) throw new Error("A project can include up to 4 artists.");
+  const seen = new Set<string>();
+  return source.map((entry: any, index: number) => {
+    const artistId = String(entry?.artistId || entry?.characterId || "").trim();
+    if (!artistId || seen.has(artistId)) throw new Error("Each cast member must be a unique Artist Locker entry.");
+    seen.add(artistId);
+    return {
+      artistId,
+      role: String(entry?.role || (index === 0 ? "Lead Vocalist" : "Featured Artist")).trim().slice(0, 80),
+      appearanceNotes: String(entry?.appearanceNotes || "").trim() || null,
+      sortOrder: index + 1,
+    };
+  });
+}
+const projectCastInclude = {
+  castMembers: { include: { artist: true }, orderBy: { sortOrder: "asc" as const } },
+};
+
 app.post("/api/projects", async (req: Request, res: Response) => {
   try {
     const title = String(req.body?.title || "Untitled Music Video").trim();
@@ -650,7 +671,8 @@ app.post("/api/projects", async (req: Request, res: Response) => {
     const aspectRatio = ["16:9", "9:16", "1:1"].includes(req.body?.aspectRatio) ? req.body.aspectRatio : "16:9";
     const videoType = normalizeVideoType(req.body?.videoType);
     const rawLyrics = String(req.body?.rawLyrics || "");
-    const characterId = req.body?.characterId ? String(req.body.characterId) : null;
+    const castMembers = normalizeCastInput(req.body?.castMembers, req.body?.characterId);
+    const characterId = castMembers[0]?.artistId || (req.body?.characterId ? String(req.body.characterId) : null);
 
     const project = await prisma.project.create({
       data: {
@@ -660,6 +682,7 @@ app.post("/api/projects", async (req: Request, res: Response) => {
         videoType,
         rawLyrics,
         characterId,
+        castMembers: { create: castMembers },
         status: "draft",
       },
       include: {
@@ -690,6 +713,11 @@ app.patch("/api/projects/:id", async (req: Request, res: Response) => {
     if (req.body?.rawLyrics !== undefined) data.rawLyrics = String(req.body.rawLyrics);
     if (req.body?.lyricsJson !== undefined) data.lyricsJson = String(req.body.lyricsJson);
     if (req.body?.characterId !== undefined) data.characterId = req.body.characterId ? String(req.body.characterId) : null;
+    if (req.body?.castMembers !== undefined) {
+      const castMembers = normalizeCastInput(req.body.castMembers, req.body?.characterId);
+      data.characterId = castMembers[0]?.artistId || null;
+      data.castMembers = { deleteMany: {}, create: castMembers };
+    }
     if (req.body?.status !== undefined) data.status = String(req.body.status);
 
     const project = await prisma.project.update({
@@ -954,7 +982,7 @@ app.post("/api/projects/:id/split-lyrics", async (req: Request, res: Response) =
     const id = String(req.params.id);
     const project = await prisma.project.findUnique({
       where: { id },
-      include: { character: true },
+      include: { character: true, ...projectCastInclude },
     });
     if (!project) {
       res.status(404).json({ error: "Project not found." });
@@ -1603,6 +1631,11 @@ app.patch("/api/scenes/:id", async (req: Request, res: Response) => {
     if (req.body?.shotType !== undefined) data.shotType = String(req.body.shotType);
     if (req.body?.imagePrompt !== undefined) data.imagePrompt = String(req.body.imagePrompt);
     if (req.body?.motionPrompt !== undefined) data.motionPrompt = String(req.body.motionPrompt);
+    if (req.body?.castArtistIds !== undefined) {
+      const ids = Array.isArray(req.body.castArtistIds) ? req.body.castArtistIds : [];
+      if (ids.length > 4) throw new Error("A shot can include up to 4 cast members.");
+      data.castArtistIds = JSON.stringify([...new Set(ids.map((v: unknown) => String(v)))]);
+    }
     if (req.body?.status !== undefined) data.status = String(req.body.status);
 
     const scene = await prisma.scene.update({ where: { id }, data });
