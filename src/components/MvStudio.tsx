@@ -185,6 +185,15 @@ export const MvStudio: React.FC<MvStudioProps> = ({
   const [newCharacterId, setNewCharacterId] = useState<string>(preselectedCharacterId || "");
   const [newRawLyrics, setNewRawLyrics] = useState("");
   const [newAudioFile, setNewAudioFile] = useState<File | null>(null);
+  const [ezwayTracks, setEzwayTracks] = useState<Array<{
+    id: string; name: string; artist: string | null; duration: number | null;
+    bpm: number | null; key_signature: string | null; lyrics: string | null;
+    hasAudio: boolean; hasLyrics: boolean;
+  }>>([]);
+  const [ezwayTracksLoading, setEzwayTracksLoading] = useState(false);
+  const [ezwayTracksError, setEzwayTracksError] = useState<string | null>(null);
+  const [selectedEzwayTrackId, setSelectedEzwayTrackId] = useState("");
+  const [importingEzwayTrack, setImportingEzwayTrack] = useState(false);
   const [creatingProject, setCreatingProject] = useState(false);
   const [processingStage, setProcessingStage] = useState<string | null>(null);
   const newAudioInputRef = useRef<HTMLInputElement | null>(null);
@@ -226,6 +235,56 @@ export const MvStudio: React.FC<MvStudioProps> = ({
   const [confirmDeleteProj, setConfirmDeleteProj] = useState(false);
 
   const analyzeAudioInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!newProjectOpen) return;
+    let active = true;
+    setEzwayTracksLoading(true);
+    setEzwayTracksError(null);
+    fetch("/api/ezway/tracks")
+      .then(async (res) => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Could not load your EZway library.");
+        if (active) setEzwayTracks(data.tracks || []);
+      })
+      .catch((err) => {
+        if (active) setEzwayTracksError(err instanceof Error ? err.message : "Could not load your EZway library.");
+      })
+      .finally(() => {
+        if (active) setEzwayTracksLoading(false);
+      });
+    return () => { active = false; };
+  }, [newProjectOpen]);
+
+  const handleImportEzwayTrack = async () => {
+    const track = ezwayTracks.find((item) => item.id === selectedEzwayTrackId);
+    if (!track) return;
+    setImportingEzwayTrack(true);
+    setError(null);
+    try {
+      setNewTitle((current) => current.trim() || track.name);
+      setNewRawLyrics(track.lyrics || "");
+      if (track.hasAudio) {
+        const urlRes = await fetch(`/api/ezway/tracks/${encodeURIComponent(track.id)}/audio-url`, { method: "POST" });
+        const urlData = await urlRes.json();
+        if (!urlRes.ok) throw new Error(urlData.error || "Could not prepare this EZway audio.");
+        const audioRes = await fetch(urlData.audioUrl);
+        if (!audioRes.ok) throw new Error(`Could not download the selected EZway track (${audioRes.status}).`);
+        const audioBlob = await audioRes.blob();
+        const safeName = track.name.replace(/[^a-z0-9-_]+/gi, "_").replace(/^_+|_+$/g, "") || "ezway-track";
+        const extension = audioBlob.type.includes("wav") ? ".wav" : audioBlob.type.includes("mp4") ? ".m4a" : ".mp3";
+        setNewAudioFile(new File([audioBlob], `${safeName}${extension}`, { type: audioBlob.type || "audio/mpeg" }));
+        setStatusNotice(`Imported "${track.name}" from EZway. The original EZway file remains untouched; create the project to run Whisper + Demucs.`);
+      } else {
+        setNewAudioFile(null);
+        setStatusNotice(`Imported lyrics for "${track.name}" from EZway. No audio file is stored for this track.`);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not import the selected EZway track.");
+    } finally {
+      setImportingEzwayTrack(false);
+    }
+  };
 
   useEffect(() => {
     if (preselectedCharacterId) {
@@ -923,6 +982,45 @@ export const MvStudio: React.FC<MvStudioProps> = ({
               </span>
             )}
           </div>
+
+          <section className="rounded-xl bg-zinc-950/80 border border-amber-700/40 p-4 space-y-3">
+            <div>
+              <h3 className="text-sm font-semibold text-amber-200">Import from EZway Library</h3>
+              <p className="text-xs text-zinc-400 mt-1">Choose one of your saved tracks. Lyrics and audio are read from your private EZway library; the original track is not moved or changed.</p>
+            </div>
+            {ezwayTracksLoading ? (
+              <p className="text-sm text-zinc-400">Loading your EZway tracks…</p>
+            ) : ezwayTracksError ? (
+              <p role="alert" className="text-sm text-amber-200">{ezwayTracksError}</p>
+            ) : ezwayTracks.length === 0 ? (
+              <p className="text-sm text-zinc-400">No ready tracks were found in EZway.</p>
+            ) : (
+              <div className="flex flex-col sm:flex-row gap-2">
+                <select
+                  aria-label="Choose a track from EZway"
+                  value={selectedEzwayTrackId}
+                  onChange={(e) => setSelectedEzwayTrackId(e.target.value)}
+                  className="flex-1 min-h-[46px] px-3 rounded-lg bg-zinc-900 border border-zinc-700 text-sm text-zinc-100"
+                >
+                  <option value="">Select an EZway track…</option>
+                  {ezwayTracks.map((track) => (
+                    <option key={track.id} value={track.id}>
+                      {track.name} · {track.artist || "Unknown artist"} · {track.hasAudio ? "Audio" : "Lyrics only"}{track.hasLyrics ? " + Lyrics" : ""}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => void handleImportEzwayTrack()}
+                  disabled={!selectedEzwayTrackId || importingEzwayTrack}
+                  className="min-h-[46px] px-5 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-zinc-950 text-sm font-semibold"
+                >
+                  {importingEzwayTrack ? "Importing…" : "Use This Track"}
+                </button>
+              </div>
+            )}
+            {ezwayTracks.length > 0 && <p className="text-[11px] text-zinc-500">{ezwayTracks.length} ready tracks available in your EZway library.</p>}
+          </section>
 
           <div className="space-y-2.5">
             <span className="block text-sm font-medium text-zinc-200">
