@@ -12,6 +12,7 @@ import { GoogleGenAI } from "@google/genai";
 import OpenAI from "openai";
 
 const execFileAsync = promisify(execFile);
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const prisma = new PrismaClient();
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -473,7 +474,38 @@ async function getAudioDurationSec(publicRelPath: string | null | undefined): Pr
   }
 }
 
-// ---------- Health & Capabilities ----------// ---------- Health & Capabilities ----------
+// ---------- Health & Capabilities ----------
+async function pingModalHealth(name: string, url: string | undefined, token: string | undefined): Promise<void> {
+  const baseUrl = url?.trim().replace(/\/+$/, "");
+  if (!baseUrl || !token?.trim()) return;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch(`${baseUrl}/health`, {
+      headers: { authorization: `Bearer ${token.trim()}` },
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  } catch (error) {
+    console.warn(`Modal ${name} warmup ping did not complete:`, error instanceof Error ? error.message : error);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function warmModalServices(): Promise<void> {
+  await Promise.allSettled([
+    pingModalHealth("FLUX", process.env.MODAL_FLUX_URL, process.env.MODAL_FLUX_API_TOKEN),
+    pingModalHealth("LTX-2.5", process.env.MODAL_LTX_URL, process.env.MODAL_LTX_API_TOKEN),
+    pingModalHealth("MuseTalk", process.env.MODAL_LIPSYNC_URL, process.env.MODAL_LIPSYNC_API_TOKEN),
+  ]);
+}
+
+app.post("/api/warmup", (_req: Request, res: Response) => {
+  res.status(202).json({ accepted: true, message: "Modal service warmup pings started." });
+  void warmModalServices();
+});
+
 app.get("/api/capabilities", async (_req: Request, res: Response) => {
   let hasFfmpeg = false;
   try {
@@ -1057,8 +1089,9 @@ ${lines.slice(0, 16).map((l, i) => `${i + 1}. ${l}`).join("\n")}
 
 Return a JSON array where each element has:
 - lyricSegment (string)
-- shotType (one of: "Wide Establishing", "Medium Close-Up", "Tracking Side Shot", "Low-Angle Hero", "Extreme Close-Up", "Silhouette Backlit")
-- imagePrompt (rich cinematic image prompt featuring the artist and scene mood, 1-2 sentences)
+- shotType: return exactly "lipsync" ONLY for a close-up, medium-close-up, or extreme-close-up where one artist's face fills most of the frame and the mouth is clearly visible; return exactly "broll" for every other composition.
+- imagePrompt (rich cinematic image prompt featuring the artist and scene mood, 1-2 sentences; explicitly state the framing)
+LIP-SYNC GATING IS STRICT and applies in every video mode, including Performance: wide shots, establishing shots, full-body shots, group shots, backup-singer group shots, silhouettes, tracking side shots, and over-the-shoulder shots MUST be "broll". Only an intimate single-face close-up with the mouth clearly visible may be "lipsync". Never choose lipsync merely because the artist is performing or singing.
 - motionPrompt (camera movement note, under 12 words)
 - durationSec (number between 3 and 6)`;
 
@@ -1072,7 +1105,14 @@ Return a JSON array where each element has:
         if (Array.isArray(parsed) && parsed.length > 0) {
           draftedScenes = parsed.map((item, idx) => ({
             lyricSegment: String(item.lyricSegment || lines[idx] || ""),
-            shotType: String(item.shotType || SHOT_ROTATION[idx % SHOT_ROTATION.length]),
+            shotType: (() => {
+              const framing = String(item.shotType || "").toLowerCase();
+              const imagePrompt = String(item.imagePrompt || "").toLowerCase();
+              const excluded = /(wide|full[- ]?body|group|over[- ]the[- ]shoulder|establishing|tracking side|silhouette)/i.test(`${framing} ${imagePrompt}`);
+              const closeUp = /(medium[- ]close[- ]up|extreme[- ]close[- ]up|close[- ]up|closeup)/i.test(framing) ||
+                (framing === "lipsync" && /(face.{0,30}(fills|filling)|mouth.{0,30}(visible|frame)|close[- ]?up)/i.test(imagePrompt));
+              return closeUp && !excluded ? "lipsync" : "broll";
+            })(),
             imagePrompt: String(item.imagePrompt || `${artistPrefix}, ${lines[idx] || ""}${conceptSuffix}`),
             motionPrompt: String(item.motionPrompt || MOTION_ROTATION[idx % MOTION_ROTATION.length]),
             durationSec: Math.max(2, Math.min(12, Number(item.durationSec) || secPerScene)),
@@ -1088,7 +1128,7 @@ Return a JSON array where each element has:
         const shotType = SHOT_ROTATION[idx % SHOT_ROTATION.length];
         return {
           lyricSegment: line,
-          shotType,
+          shotType: /(medium[- ]close[- ]up|extreme[- ]close[- ]up)/i.test(shotType) ? "lipsync" : "broll",
           imagePrompt: `${shotType} shot of ${artistPrefix} performing "${line}"${conceptSuffix}, 35mm anamorphic cinema still`,
           motionPrompt: MOTION_ROTATION[idx % MOTION_ROTATION.length],
           durationSec: secPerScene,
@@ -1622,12 +1662,16 @@ app.post("/api/projects/:id/generate-keyframes", async (req: Request, res: Respo
       return;
     }
 
-    // Keep the existing bulk-keyframe workflow; FLUX runs through Modal.
-    const batchSize = 3;
-    for (let i = 0; i < project.scenes.length; i += batchSize) {
-      const batch = project.scenes.slice(i, i + batchSize);
-      await Promise.all(
-        batch.map(async (scene) => {
+    // Up to eight FLUX requests in flight, with 250ms staggered dispatch.
+    let nextKeyframeIndex = 0;
+    const keyframeWorkers = Array.from(
+      { length: Math.min(8, project.scenes.length) },
+      async (_, workerIndex) => {
+        if (workerIndex > 0) await sleep(workerIndex * 250);
+        while (true) {
+          const index = nextKeyframeIndex++;
+          if (index >= project.scenes.length) break;
+          const scene = project.scenes[index];
           const imagePath = await generateSceneWithProjectCast({
             projectId: project.id,
             orderIndex: scene.orderIndex,
@@ -1642,9 +1686,11 @@ app.post("/api/projects/:id/generate-keyframes", async (req: Request, res: Respo
             where: { id: scene.id },
             data: { imagePath, status: "ready" },
           });
-        })
-      );
-    }
+          await sleep(250);
+        }
+      }
+    );
+    await Promise.all(keyframeWorkers);
 
     const updated = await prisma.project.update({
       where: { id },
@@ -1850,6 +1896,29 @@ interface RenderJob {
 
 const renderJobs = new Map<string, RenderJob>();
 
+async function preSliceLipSyncAudio(
+  scenes: Array<{ orderIndex: number; startSec: number; endSec: number }>,
+  sourceAudioAbs: string,
+  projectDir: string
+): Promise<Map<number, string>> {
+  const slices = new Map<number, string>();
+  if (scenes.length === 0) return slices;
+  const filters: string[] = [];
+  const args: string[] = ["-y", "-i", sourceAudioAbs, "-filter_complex"];
+  scenes.forEach((scene, index) => {
+    const start = Math.max(0, Number(scene.startSec) || 0);
+    const duration = Math.max(1, Number((scene.endSec - scene.startSec).toFixed(2)) || 4.5);
+    filters.push(`[0:a]atrim=start=${start}:duration=${duration},asetpts=PTS-STARTPTS,aresample=44100,aformat=sample_fmts=s16:channel_layouts=mono[vocal${index}]`);
+    slices.set(scene.orderIndex, path.join(projectDir, `vocal_${scene.orderIndex}.wav`));
+  });
+  args.push(filters.join(";"));
+  scenes.forEach((scene, index) => {
+    args.push("-map", `[vocal${index}]`, "-c:a", "pcm_s16le", slices.get(scene.orderIndex)!);
+  });
+  await execFileAsync("ffmpeg", args, { maxBuffer: 16 * 1024 * 1024 });
+  return slices;
+}
+
 async function runRenderPipeline(
   projectId: string,
   job: RenderJob,
@@ -1896,8 +1965,19 @@ async function runRenderPipeline(
       ? songAbs
       : null;
 
+    const lipSyncScenes = readyScenes.filter((scene) => scene.shotType === "lipsync");
+    const vocalSlices = new Map<number, string>();
+    if (lipSyncScenes.length > 0) {
+      if (!lipsyncAudioSourceAbs) {
+        throw new Error("Lip-sync shots need vocals.wav or the uploaded song audio, but no source audio was found.");
+      }
+      job.currentStep = `Pre-slicing ${lipSyncScenes.length} vocal segments in one FFmpeg pass...`;
+      const preparedSlices = await preSliceLipSyncAudio(lipSyncScenes, lipsyncAudioSourceAbs, projectDir);
+      for (const [orderIndex, slicePath] of preparedSlices) vocalSlices.set(orderIndex, slicePath);
+    }
+
     const orderedClipPaths: Array<string | null> = new Array(readyScenes.length).fill(null);
-    const CONCURRENCY = Math.min(5, readyScenes.length);
+    const CONCURRENCY = Math.min(8, readyScenes.length);
     let nextQueueIdx = 0;
     const activeShotNumbers = new Set<number>();
 
@@ -1949,23 +2029,10 @@ async function runRenderPipeline(
             label: "Slicing vocals.wav & running MuseTalk lip-sync...",
           };
 
-          const vocalSliceAbs = path.join(projectDir, `vocal_${s.orderIndex}.wav`);
-          await execFileAsync("ffmpeg", [
-            "-y",
-            "-ss",
-            String(Math.max(0, s.startSec)),
-            "-t",
-            String(duration),
-            "-i",
-            lipsyncAudioSourceAbs,
-            "-ar",
-            "44100",
-            "-ac",
-            "1",
-            "-c:a",
-            "pcm_s16le",
-            vocalSliceAbs,
-          ]);
+          const vocalSliceAbs = vocalSlices.get(s.orderIndex);
+          if (!vocalSliceAbs || !fs.existsSync(vocalSliceAbs)) {
+            throw new Error(`Pre-sliced vocal audio for Shot ${shotNum} is missing.`);
+          }
 
           // Preserve the existing still-image-to-video input before lip-sync.
           const baseLipsyncVideoAbs = path.join(projectDir, `base_lipsync_${s.orderIndex}.mp4`);
@@ -2075,12 +2142,14 @@ async function runRenderPipeline(
       }
     };
 
-    const workers = Array.from({ length: CONCURRENCY }, async () => {
+    const workers = Array.from({ length: CONCURRENCY }, async (_, workerIndex) => {
+      if (workerIndex > 0) await sleep(workerIndex * 250);
       while (true) {
         const idx = nextQueueIdx;
         nextQueueIdx += 1;
         if (idx >= readyScenes.length) break;
         await renderSingleScene(idx);
+        await sleep(250);
       }
     });
 
