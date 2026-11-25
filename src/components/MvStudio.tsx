@@ -285,6 +285,14 @@ export const MvStudio: React.FC<MvStudioProps> = ({
     }
   }, [activeProject?.id]);
 
+  // Ping Modal services as soon as a project opens so their web endpoints are awake before generation.
+  useEffect(() => {
+    if (!activeProject?.id) return;
+    void fetch("/api/warmup", { method: "POST" }).catch(() => {
+      // Warmup is opportunistic; never block project loading or the user's workflow.
+    });
+  }, [activeProject?.id]);
+
   // Sync active render job when switching projects
   useEffect(() => {
     if (!activeProject?.id) {
@@ -595,7 +603,7 @@ export const MvStudio: React.FC<MvStudioProps> = ({
     setStatusNotice(null);
     setGeneratingKeyframes(true);
     setProcessingStage(
-      `Generating ${activeProject.scenes.length} consistent keyframes with FLUX Kontext on Modal and saving to public/projects/${activeProject.id}/...`
+      `Generating ${activeProject.scenes.length} consistent keyframes with 8 staggered FLUX requests and saving to public/projects/${activeProject.id}/...`
     );
 
     try {
@@ -2230,7 +2238,7 @@ export const MvStudio: React.FC<MvStudioProps> = ({
                   )}
                 </p>
               </div>
-              <span className="text-xs text-zinc-400 font-mono shrink-0">5 parallel workers</span>
+              <span className="text-xs text-zinc-400 font-mono shrink-0">8 parallel workers · 250ms stagger</span>
             </div>
 
             <div className="space-y-2">
