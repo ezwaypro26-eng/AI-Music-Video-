@@ -475,19 +475,26 @@ async function getAudioDurationSec(publicRelPath: string | null | undefined): Pr
 }
 
 // ---------- Health & Capabilities ----------
-async function pingModalHealth(name: string, url: string | undefined, token: string | undefined): Promise<void> {
+async function pingModalWarmup(name: string, url: string | undefined, token: string | undefined): Promise<void> {
   const baseUrl = url?.trim().replace(/\/+$/, "");
   if (!baseUrl || !token?.trim()) return;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 5000);
+  const timeout = setTimeout(() => controller.abort(), 8000);
   try {
-    const response = await fetch(`${baseUrl}/health`, {
-      headers: { authorization: `Bearer ${token.trim()}` },
+    const response = await fetch(`${baseUrl}/warmup`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token.trim()}`,
+        "content-type": "application/json",
+      },
+      body: "{}",
       signal: controller.signal,
     });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}: ${(await response.text()).slice(0, 250)}`);
+    const result = await response.json() as { call_id?: string; status?: string };
+    console.info(`Modal ${name} GPU warmup accepted:`, result.status || result.call_id || "accepted");
   } catch (error) {
-    console.warn(`Modal ${name} warmup ping did not complete:`, error instanceof Error ? error.message : error);
+    console.warn(`Modal ${name} warmup request did not complete:`, error instanceof Error ? error.message : error);
   } finally {
     clearTimeout(timeout);
   }
@@ -495,9 +502,9 @@ async function pingModalHealth(name: string, url: string | undefined, token: str
 
 async function warmModalServices(): Promise<void> {
   await Promise.allSettled([
-    pingModalHealth("FLUX", process.env.MODAL_FLUX_URL, process.env.MODAL_FLUX_API_TOKEN),
-    pingModalHealth("LTX-2.5", process.env.MODAL_LTX_URL, process.env.MODAL_LTX_API_TOKEN),
-    pingModalHealth("MuseTalk", process.env.MODAL_LIPSYNC_URL, process.env.MODAL_LIPSYNC_API_TOKEN),
+    pingModalWarmup("FLUX", process.env.MODAL_FLUX_URL, process.env.MODAL_FLUX_API_TOKEN),
+    pingModalWarmup("LTX-2.5", process.env.MODAL_LTX_URL, process.env.MODAL_LTX_API_TOKEN),
+    pingModalWarmup("MuseTalk", process.env.MODAL_LIPSYNC_URL, process.env.MODAL_LIPSYNC_API_TOKEN),
   ]);
 }
 
