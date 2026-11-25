@@ -1892,7 +1892,7 @@ export const MvStudio: React.FC<MvStudioProps> = ({
                   Storyboard Grid &amp; Keyframes ({activeProject.scenes.length} shots)
                 </h2>
                 <p className="text-xs sm:text-sm text-zinc-400">
-                  Generates character-locked frames via FLUX Kontext on Modal, saved to <span className="font-mono text-zinc-300">public/projects/{activeProject.id}/</span>
+                  Generates character-locked frames with up to 8 staggered FLUX requests (250ms dispatch spacing), saved to <span className="font-mono text-zinc-300">public/projects/{activeProject.id}/</span>
                 </p>
               </div>
 
