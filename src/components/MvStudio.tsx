@@ -49,6 +49,17 @@ interface MvStudioProps {
   onProjectDeleted: (id: string) => void;
 }
 
+type CastDraftEntry = { artistId: string; role: string; appearanceNotes: string };
+
+const CAST_ROLES = ["Lead Vocalist", "Featured Artist", "Backup Vocalist", "Co-Star / Love Interest"];
+
+function readCastIds(value?: string): string[] {
+  try {
+    const parsed = JSON.parse(value || "[]");
+    return Array.isArray(parsed) ? parsed.map(String).slice(0, 4) : [];
+  } catch { return []; }
+}
+
 interface TimestampSegment {
   orderIndex: number;
   startSec: number;
@@ -184,6 +195,8 @@ export const MvStudio: React.FC<MvStudioProps> = ({
   const [aspectRatio, setAspectRatio] = useState<string>("16:9");
   const [videoType, setVideoType] = useState<MusicVideoType>("narrative");
   const [characterId, setCharacterId] = useState<string>("");
+  const [castDraft, setCastDraft] = useState<CastDraftEntry[]>([]);
+  const [castPickerId, setCastPickerId] = useState("");
   const [rawLyrics, setRawLyrics] = useState("");
   const [secPerScene, setSecPerScene] = useState(4);
 
@@ -227,6 +240,12 @@ export const MvStudio: React.FC<MvStudioProps> = ({
     setAspectRatio(activeProject.aspectRatio || "16:9");
     setVideoType(normalizeMusicVideoType(activeProject.videoType));
     setCharacterId(activeProject.characterId || "");
+    const savedCast = (activeProject.castMembers || []).map((entry) => ({
+      artistId: entry.artistId, role: entry.role || "Lead Vocalist", appearanceNotes: entry.appearanceNotes || "",
+    }));
+    setCastDraft(savedCast.length ? savedCast : activeProject.characterId ? [{
+      artistId: activeProject.characterId, role: "Lead Vocalist", appearanceNotes: "",
+    }] : []);
     setRawLyrics(activeProject.rawLyrics || "");
     setConfirmDeleteProj(false);
 
@@ -394,6 +413,7 @@ export const MvStudio: React.FC<MvStudioProps> = ({
           videoType: newVideoType,
           rawLyrics: newRawLyrics,
           characterId: newCharacterId || null,
+          castMembers: newCharacterId ? [{ artistId: newCharacterId, role: "Lead Vocalist", appearanceNotes: "" }] : [],
         }),
       });
       const createData = await createRes.json();
@@ -503,7 +523,8 @@ export const MvStudio: React.FC<MvStudioProps> = ({
           aspectRatio,
           videoType,
           rawLyrics,
-          characterId: characterId || null,
+          characterId: castDraft[0]?.artistId || characterId || null,
+          castMembers: castDraft.map((entry, index) => ({ ...entry, sortOrder: index + 1 })),
         }),
       });
       const data = await res.json();
@@ -545,7 +566,8 @@ export const MvStudio: React.FC<MvStudioProps> = ({
           aspectRatio,
           videoType,
           rawLyrics,
-          characterId: characterId || null,
+          characterId: castDraft[0]?.artistId || characterId || null,
+          castMembers: castDraft.map((entry, index) => ({ ...entry, sortOrder: index + 1 })),
           scopeMode,
           sectionStartSec,
           sectionEndSec: clampedSectionEndSec,
@@ -1263,20 +1285,67 @@ export const MvStudio: React.FC<MvStudioProps> = ({
                   />
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-medium text-zinc-400">Lead Artist</label>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-300">Cast Lineup (Up to 4 Artists)</label>
+                      <p className="text-[11px] text-zinc-500 mt-1">Choose Artist Locker portraits, assign roles, and lock each video's look.</p>
+                    </div>
+                    <span className="text-xs font-mono text-amber-400">{castDraft.length}/4</span>
+                  </div>
                   <select
-                    value={characterId}
-                    onChange={(e) => setCharacterId(e.target.value)}
+                    value={castPickerId}
+                    disabled={castDraft.length >= 4}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      setCastPickerId("");
+                      if (id && !castDraft.some((entry) => entry.artistId === id) && castDraft.length < 4) {
+                        setCastDraft((prev) => [...prev, { artistId: id, role: prev.length ? "Featured Artist" : "Lead Vocalist", appearanceNotes: "" }]);
+                      }
+                    }}
                     className="w-full min-h-[44px] px-3.5 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-sm text-zinc-100 focus:outline-none focus:border-amber-500"
                   >
-                    <option value="">Unassigned</option>
-                    {characters.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
+                    <option value="">+ Add artist from Artist Locker</option>
+                    {characters.filter((artist) => !castDraft.some((entry) => entry.artistId === artist.id)).map((artist) => (
+                      <option key={artist.id} value={artist.id}>{artist.name}</option>
                     ))}
                   </select>
+                  {castDraft.length > 0 && (
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      {castDraft.map((entry, index) => {
+                        const artist = characters.find((item) => item.id === entry.artistId);
+                        if (!artist) return null;
+                        const standardRole = CAST_ROLES.includes(entry.role);
+                        return (
+                          <div key={entry.artistId} className="min-w-0 rounded-xl border border-zinc-800 bg-zinc-950/70 p-2.5 space-y-2">
+                            <div className="aspect-[3/4] rounded-lg overflow-hidden bg-zinc-900">
+                              <img src={artist.refImagePath} alt={artist.name} className="w-full h-full object-cover" />
+                            </div>
+                            <p className="text-xs font-semibold text-zinc-100 truncate">{artist.name}</p>
+                            <select
+                              value={standardRole ? entry.role : "Custom role"}
+                              onChange={(e) => setCastDraft((prev) => prev.map((item) => item.artistId === entry.artistId ? { ...item, role: e.target.value === "Custom role" ? "" : e.target.value } : item))}
+                              className="w-full min-h-[38px] rounded-lg bg-zinc-900 border border-zinc-700 px-2 text-[11px] text-zinc-100"
+                            >
+                              {CAST_ROLES.map((role) => <option key={role} value={role}>{role}</option>)}
+                              <option value="Custom role">Custom role…</option>
+                            </select>
+                            {!standardRole && (
+                              <input value={entry.role} onChange={(e) => setCastDraft((prev) => prev.map((item) => item.artistId === entry.artistId ? { ...item, role: e.target.value } : item))} placeholder="Enter custom role" className="w-full min-h-[36px] rounded-lg bg-zinc-900 border border-zinc-700 px-2 text-[11px] text-zinc-100" />
+                            )}
+                            <textarea
+                              value={entry.appearanceNotes}
+                              onChange={(e) => setCastDraft((prev) => prev.map((item) => item.artistId === entry.artistId ? { ...item, appearanceNotes: e.target.value } : item))}
+                              rows={2}
+                              placeholder="Outfit / look lock for this video"
+                              className="w-full rounded-lg bg-zinc-900 border border-zinc-700 p-2 text-[11px] text-zinc-100 resize-y"
+                            />
+                            <button type="button" onClick={() => setCastDraft((prev) => prev.filter((item) => item.artistId !== entry.artistId))} className="w-full min-h-[34px] rounded-lg border border-zinc-700 text-[11px] text-zinc-400 hover:text-red-300">Remove</button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1328,24 +1397,7 @@ export const MvStudio: React.FC<MvStudioProps> = ({
                 </div>
               </div>
 
-              {activeProject.character && (
-                <div className="pt-3 border-t border-zinc-800/70 flex items-center gap-3.5">
-                  <img
-                    src={activeProject.character.refImagePath}
-                    alt={activeProject.character.name}
-                    referrerPolicy="no-referrer"
-                    className="w-12 h-14 rounded-lg object-cover bg-zinc-900 shrink-0"
-                  />
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-zinc-100 truncate">
-                      {activeProject.character.name}
-                    </p>
-                    <p className="text-xs text-zinc-400 truncate">
-                      {activeProject.character.visualPrompt}
-                    </p>
-                  </div>
-                </div>
-              )}
+
             </section>
 
             {/* Audio Upload & Whisper + Demucs Analysis Deck */}
