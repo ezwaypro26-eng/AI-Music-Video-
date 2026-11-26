@@ -514,9 +514,6 @@ async function generateImageWithModalFlux(params: {
     await sleep(3000);
   }
   throw new Error("Modal FLUX keyframe exceeded the 35-minute job window. Check Modal logs before retrying.");
-  if (imageBytes.length < 1024) throw new Error("Modal FLUX returned an empty or incomplete image.");
-  fs.mkdirSync(path.dirname(params.targetAbsPath), { recursive: true });
-  fs.writeFileSync(params.targetAbsPath, imageBytes);
 }
 
 async function saveScenePngFromModalFlux(params: {
@@ -767,7 +764,7 @@ app.get("/api/ezway/tracks/:id/audio", async (req: Request, res: Response) => {
     lookupUrl.searchParams.set("select", "id,file_key");
     lookupUrl.searchParams.set("id", `eq.${trackId}`);
     lookupUrl.searchParams.set("limit", "1");
-    const authHeaders = key.startsWith("sb_")
+    const authHeaders: Record<string, string> = key.startsWith("sb_")
       ? { apikey: key }
       : { apikey: key, authorization: `Bearer ${key}` };
     const lookup = await fetch(lookupUrl, { headers: authHeaders });
