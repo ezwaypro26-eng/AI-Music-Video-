@@ -1,5 +1,5 @@
 ---
-title: Nocturne ZeroGPU
+title: Nocturne Studio
 emoji: 🎬
 colorFrom: purple
 colorTo: gray
@@ -8,11 +8,11 @@ sdk_version: "6.32.0"
 app_file: app.py
 python_version: "3.12"
 startup_duration_timeout: 30m
-short_description: Private GPU test space for Nocturne Studio
+short_description: Private Nocturne Artist Locker preview
 ---
 
-# Nocturne ZeroGPU
+# Nocturne Studio — Artist Locker
 
-Private GPU worker for the separate Nocturne Studio Hugging Face build.
+Private, separate Hugging Face build of Nocturne Studio. This first milestone provides the Artist Locker interface without requesting GPU time.
 
-This initial page is a small GPU connectivity check. It does not access the production Nocturne database, EZway, Modal, or any user media. The GPU is only requested when the user presses **Check ZeroGPU**.
+Artist entries are currently session-only. Durable private storage and database integration will be connected after secure storage credentials are configured. This Space does not connect to the production Nocturne database, EZway, Render, or Modal.
