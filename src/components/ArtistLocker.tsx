@@ -203,7 +203,7 @@ export const ArtistLocker: React.FC<ArtistLockerProps> = ({
                 Create Artist Profile
               </h2>
               <p className="text-sm text-zinc-400 mt-0.5">
-                Saved directly to local SQLite and <span className="font-mono text-zinc-300">public/characters/</span>
+                Saved to your private Nocturne database and Supabase Storage
               </p>
             </div>
 
@@ -360,7 +360,7 @@ export const ArtistLocker: React.FC<ArtistLockerProps> = ({
                       <span>FLUX Artist Portrait Pipeline</span>
                     </div>
                     <p className="text-sm text-zinc-400 leading-relaxed">
-                      Generates a 3:4 editorial singer portrait via Hugging Face FLUX on Modal and saves the image directly into <span className="font-mono text-zinc-300">public/characters/</span> for reuse across scenes.
+                      Generates a 3:4 editorial singer portrait via Hugging Face FLUX on Modal and saves the image to private Supabase Storage for reuse across scenes.
                     </p>
                   </div>
                   <div className="pt-4 border-t border-zinc-800/80 text-xs text-zinc-500 flex items-center justify-between font-mono">
