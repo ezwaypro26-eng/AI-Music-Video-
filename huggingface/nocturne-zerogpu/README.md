@@ -4,9 +4,10 @@ emoji: 🎬
 colorFrom: purple
 colorTo: gray
 sdk: gradio
+sdk_version: "6.32.0"
 app_file: app.py
 python_version: "3.12"
-hardware: zero-a10g
+startup_duration_timeout: 30m
 short_description: Private GPU test space for Nocturne Studio
 ---
 
