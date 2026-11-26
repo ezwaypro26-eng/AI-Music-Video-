@@ -244,8 +244,7 @@ function getSupabaseStorageHeaders(contentType: string) {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
   if (!key) throw new Error("SUPABASE_SERVICE_ROLE_KEY is not configured on Render.");
   return {
-    apikey: key,
-    authorization: `Bearer ${key}`,
+    ...(key.startsWith("sb_") ? { apikey: key } : { apikey: key, authorization: `Bearer ${key}` }),
     "content-type": contentType,
     "x-upsert": "true",
   };
