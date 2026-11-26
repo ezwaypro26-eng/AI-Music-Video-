@@ -2786,12 +2786,12 @@ async function startServer() {
         res.type("application/javascript").send(
           `export const createHotContext = () => ({ accept() {}, dispose() {}, prune() {}, invalidate() {}, on() {}, off() {}, send() {} });
 export const updateStyle = (id, content) => {
-  let el = document.querySelector(`style[data-vite-dev-id="${id}"]`);
+  let el = document.querySelector("style[data-vite-dev-id=\"" + id + "\"]");
   if (!el) { el = document.createElement("style"); el.setAttribute("data-vite-dev-id", id); document.head.appendChild(el); }
   el.textContent = content;
 };
 export const removeStyle = (id) => {
-  const el = document.querySelector(`style[data-vite-dev-id="${id}"]`);
+  const el = document.querySelector("style[data-vite-dev-id=\"" + id + "\"]");
   if (el) el.remove();
 };
 export const injectQuery = (url) => url;`
