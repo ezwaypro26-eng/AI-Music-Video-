@@ -464,7 +464,7 @@ async function generateImageWithModalFlux(params: {
       const imageResponse = await fetch(signedUrl);
       if (!imageResponse.ok) {
         const detail = await imageResponse.text();
-        throw new Error(\`Could not download artist reference portrait from Supabase (\${imageResponse.status}): \${detail.slice(0, 300)}\`);
+        throw new Error(`Could not download artist reference portrait from Supabase (${imageResponse.status}): ${detail.slice(0, 300)}`);
       }
       const imageBytes = Buffer.from(await imageResponse.arrayBuffer());
       if (imageBytes.length < 100) throw new Error("Supabase returned an empty artist reference portrait.");
@@ -2786,12 +2786,12 @@ async function startServer() {
         res.type("application/javascript").send(
           `export const createHotContext = () => ({ accept() {}, dispose() {}, prune() {}, invalidate() {}, on() {}, off() {}, send() {} });
 export const updateStyle = (id, content) => {
-  let el = document.querySelector(\`style[data-vite-dev-id="\${id}"]\`);
+  let el = document.querySelector(`style[data-vite-dev-id="${id}"]`);
   if (!el) { el = document.createElement("style"); el.setAttribute("data-vite-dev-id", id); document.head.appendChild(el); }
   el.textContent = content;
 };
 export const removeStyle = (id) => {
-  const el = document.querySelector(\`style[data-vite-dev-id="\${id}"]\`);
+  const el = document.querySelector(`style[data-vite-dev-id="${id}"]`);
   if (el) el.remove();
 };
 export const injectQuery = (url) => url;`
