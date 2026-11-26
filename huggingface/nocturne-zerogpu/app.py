@@ -23,11 +23,27 @@ def zero_gpu_ready():
 
 
 CSS = """
-.gradio-container {max-width: 1180px !important; background:#101114 !important;}
-#hero {padding:22px 26px; border:1px solid #3a3020; border-radius:16px;
-       background:linear-gradient(120deg,#191919,#241d12);}
-#hero h1 {color:#e8b75a; margin-bottom:4px;}
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
+:root { --nocturne-bg:#090a0d; --nocturne-panel:#12151b; --nocturne-line:#292d36; --nocturne-gold:#d6ad68; }
+.gradio-container {max-width:1440px !important; background:var(--nocturne-bg) !important; color:#f2f0eb !important; font-family:'DM Sans',sans-serif !important;}
+body, .gradio-container {background:var(--nocturne-bg) !important;}
+#hero {position:relative; overflow:hidden; padding:42px 44px; margin:12px 0 28px; border:1px solid #383027; border-radius:22px; background:radial-gradient(ellipse at 82% 15%,rgba(190,139,67,.20),transparent 36%),linear-gradient(115deg,#17191f 0%,#101116 58%,#211a12 100%);}
+#hero:after {content:'N'; position:absolute; right:7%; top:-65px; font:800 270px/1 'Manrope',sans-serif; color:rgba(214,173,104,.055); pointer-events:none;}
+#hero .eyebrow {color:#d6ad68; font-size:11px; letter-spacing:3px; font-weight:700; text-transform:uppercase; margin-bottom:13px;}
+#hero h1 {font:800 clamp(32px,5vw,54px)/1.05 'Manrope',sans-serif; letter-spacing:2px; color:#f4eee3; margin:0 0 12px;}
+#hero p {color:#b4b0a8; font-size:15px; max-width:620px; margin:0; line-height:1.7;}
+#hero .hero-foot {margin-top:22px; color:#d6ad68; font-size:11px; letter-spacing:1.6px; text-transform:uppercase;}
+.section-head {border-bottom:1px solid var(--nocturne-line); padding:4px 0 14px; margin-bottom:18px;}
+.section-head h2 {font:700 20px 'Manrope',sans-serif; color:#f3eee5; margin:0 0 5px;}
+.section-head p {color:#9699a2; font-size:13px; margin:0;}
+.panel {background:linear-gradient(145deg,#151820,#101218); border:1px solid var(--nocturne-line); border-radius:18px; padding:22px !important;}
+.gradio-container label, .gradio-container .prose {color:#d8d6d0 !important;}
+.gradio-container input, .gradio-container textarea {background:#0d1015 !important; border-color:#303540 !important; border-radius:10px !important;}
+.gradio-container button.primary {background:linear-gradient(120deg,#d7b36f,#a77a3e) !important; color:#17130d !important; border:0 !important; font-weight:700 !important;}
+.gradio-container button {border-radius:10px !important;}
+.gradio-container .gallery {border-color:#303540 !important;}
 .muted {color:#aaa;}
+@media (max-width: 700px) { #hero {padding:28px 22px;} #hero:after {right:-5%; font-size:190px;} }
 """
 
 
@@ -170,33 +186,42 @@ with gr.Blocks(
 ) as demo:
     gr.HTML("""
       <div id="hero">
-        <h1>NOCTURNE STUDIO</h1>
-        <div class="muted">Artist Locker · Hugging Face ZeroGPU build</div>
-        <p class="muted">Build your cast of recurring artists and keep their visual references organized.</p>
+        <div class="eyebrow">Your creative universe · private studio</div>
+        <h1>NOCTURNE</h1>
+        <p>A cinematic workspace for building artists, shaping visual identities, and bringing music videos to life.</p>
+        <div class="hero-foot">Artist Locker &nbsp; / &nbsp; Visual continuity &nbsp; / &nbsp; Your world</div>
       </div>
     """)
-    gr.Markdown("### Owner sign-in")
+    gr.Markdown("### Studio access")
     gr.LoginButton()
     access_status = gr.Markdown("Checking sign-in…")
     with gr.Column(visible=False) as app_panel:
         state = gr.State([])
-        with gr.Row():
-            with gr.Column(scale=1):
-                gr.Markdown("## Add an artist")
-                artist_name = gr.Textbox(label="Artist name", placeholder="Enter artist or character name")
+        gr.HTML("""
+          <div class="section-head">
+            <h2>Artist Locker</h2>
+            <p>Keep your recurring cast and their visual references in one private place.</p>
+          </div>
+        """)
+        with gr.Row(equal_height=True):
+            with gr.Column(scale=4, elem_classes=["panel"]):
+                gr.Markdown("### Add to your cast")
+                gr.Markdown("<span style='color:#9699a2'>Create a visual reference that you can return to across projects.</span>")
+                artist_name = gr.Textbox(label="Artist / character name", placeholder="e.g. Maya, Lena, Main Artist")
                 visual_prompt = gr.Textbox(
-                    label="Visual notes",
-                    placeholder="Describe the look you want to keep consistent...",
+                    label="Visual identity notes",
+                    placeholder="Hair, wardrobe, features, mood, signature details...",
                     lines=4,
                 )
-                portrait = gr.Image(label="Reference portrait", type="filepath", sources=["upload"])
-                save = gr.Button("Save artist", variant="primary")
-                status = gr.Markdown("Private storage is ready when the HF_TOKEN secret is configured.")
-            with gr.Column(scale=1):
-                gr.Markdown("## Your artists")
-                gallery = gr.Gallery(label="Artist Locker", columns=2, height=420, object_fit="contain")
-                refresh = gr.Button("Refresh from private storage")
-                count = gr.Markdown("Your saved artists will appear here.")
+                portrait = gr.Image(label="Portrait reference", type="filepath", sources=["upload"], height=250)
+                save = gr.Button("＋  Save to Artist Locker", variant="primary", size="lg")
+                status = gr.Markdown("Your portraits are saved to your private Artist Locker.")
+            with gr.Column(scale=7, elem_classes=["panel"]):
+                with gr.Row():
+                    gr.Markdown("### Your saved cast")
+                    refresh = gr.Button("↻  Refresh", size="sm")
+                count = gr.Markdown("<span style='color:#9699a2'>Your saved artists will appear here.</span>")
+                gallery = gr.Gallery(label=None, columns=3, height=520, object_fit="cover", show_label=False)
         gr.Markdown(
             "Artist portraits and details are stored in a separate private Hugging Face dataset. "
             "This Space does not connect to production Nocturne, EZway, Supabase, Render, or Modal."
