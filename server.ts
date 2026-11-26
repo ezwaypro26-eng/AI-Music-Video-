@@ -85,7 +85,7 @@ const audioStorage = multer.diskStorage({
 });
 
 const uploadCharacterPhoto = multer({
-  storage: imageStorage(CHARACTERS_DIR, "char"),
+  storage: multer.memoryStorage(),
   limits: { fileSize: 20 * 1024 * 1024 },
 });
 
@@ -261,6 +261,27 @@ async function uploadNocturneObject(objectPath: string, bytes: Buffer, contentTy
     const detail = await response.text();
     throw new Error(`Supabase media backup failed for ${objectPath} (${response.status}): ${detail.slice(0, 500)}`);
   }
+}
+
+async function createNocturneSignedUrl(objectPath: string, expiresIn = 3600): Promise<string> {
+  const encodedPath = objectPath.split("/").map(encodeURIComponent).join("/");
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  if (!key) throw new Error("SUPABASE_SERVICE_ROLE_KEY is not configured on Render.");
+  const response = await fetch(`${NOCTURNE_SUPABASE_URL}/storage/v1/object/sign/${NOCTURNE_MEDIA_BUCKET}/${encodedPath}`, {
+    method: "POST",
+    headers: {
+      ...(key.startsWith("sb_") ? { apikey: key } : { apikey: key, authorization: `Bearer ${key}` }),
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ expiresIn }),
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Could not create portrait link (${response.status}): ${detail.slice(0, 300)}`);
+  }
+  const data = await response.json() as { signedURL?: string };
+  if (!data.signedURL) throw new Error("Supabase did not return a signed media URL.");
+  return data.signedURL.startsWith("http") ? data.signedURL : `${NOCTURNE_SUPABASE_URL}/storage/v1${data.signedURL.startsWith("/") ? "" : "/"}${data.signedURL}`;
 }
 
 function getAssetContentType(filePath: string): string {
@@ -825,7 +846,13 @@ app.get("/api/characters", async (_req: Request, res: Response) => {
       orderBy: { createdAt: "desc" },
       include: { _count: { select: { projects: true } } },
     });
-    res.json({ characters });
+    const withPortraitUrls = await Promise.all(characters.map(async (character) => ({
+      ...character,
+      refImagePath: character.refImagePath.startsWith("characters/")
+        ? await createNocturneSignedUrl(character.refImagePath)
+        : character.refImagePath,
+    })));
+    res.json({ characters: withPortraitUrls });
   } catch (err) {
     console.error("GET /api/characters failed:", err);
     res.status(500).json({ error: "Failed to load saved artists." });
@@ -833,6 +860,7 @@ app.get("/api/characters", async (_req: Request, res: Response) => {
 });
 
 app.post("/api/characters/upload", uploadCharacterPhoto.single("photo"), async (req: Request, res: Response) => {
+  let storedObjectPath: string | null = null;
   try {
     const file = req.file;
     const name = String(req.body?.name || "").trim();
@@ -843,12 +871,19 @@ app.post("/api/characters/upload", uploadCharacterPhoto.single("photo"), async (
       return;
     }
     if (!name) {
-      deletePublicAsset(`/characters/${file.filename}`);
       res.status(400).json({ error: "Artist name is required." });
       return;
     }
 
-    const refImagePath = `/characters/${file.filename}`;
+    const originalExt = path.extname(file.originalname || "").toLowerCase();
+    const ext = [".jpg", ".jpeg", ".png", ".webp"].includes(originalExt) ? originalExt : ".jpg";
+    const objectName = `char-${Date.now()}-${Math.random().toString(36).slice(2, 9)}${ext}`;
+    storedObjectPath = `characters/${objectName}`;
+    const contentType = file.mimetype && file.mimetype.startsWith("image/") ? file.mimetype : getAssetContentType(objectName);
+
+    // Upload the original bytes directly from memory to private Supabase Storage; no Render disk write.
+    await uploadNocturneObject(storedObjectPath, file.buffer, contentType);
+    const refImagePath = storedObjectPath;
     const character = await prisma.character.create({
       data: {
         name,
@@ -857,11 +892,11 @@ app.post("/api/characters/upload", uploadCharacterPhoto.single("photo"), async (
       },
       include: { _count: { select: { projects: true } } },
     });
-
-    res.status(201).json({ character });
+    const portraitUrl = await createNocturneSignedUrl(refImagePath);
+    res.status(201).json({ character: { ...character, refImagePath: portraitUrl } });
   } catch (err) {
     console.error("POST /api/characters/upload failed:", err);
-    res.status(500).json({ error: "Failed to save uploaded portrait." });
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to save uploaded portrait." });
   }
 });
 
