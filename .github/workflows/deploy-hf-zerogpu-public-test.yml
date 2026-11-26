@@ -1,0 +1,53 @@
+name: Deploy public Nocturne GPU diagnostic
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "huggingface/nocturne-zerogpu-public-test/**"
+      - ".github/workflows/deploy-hf-zerogpu-public-test.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Hugging Face upload client
+        run: python -m pip install --upgrade huggingface_hub
+
+      - name: Upload diagnostic app
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "Missing HF_TOKEN repository secret."
+            exit 1
+          fi
+          hf upload ezwaypro/nocturne-zerogpu-public-test huggingface/nocturne-zerogpu-public-test . --repo-type space --commit-message "Deploy public ZeroGPU diagnostic"
+
+      - name: Select included ZeroGPU hardware
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os
+          from huggingface_hub import HfApi
+
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          api.request_space_hardware(
+              repo_id="ezwaypro/nocturne-zerogpu-public-test",
+              hardware="zero-a10g",
+          )
+          print("Requested included ZeroGPU hardware.")
+          PY
