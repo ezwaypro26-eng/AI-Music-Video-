@@ -15,7 +15,7 @@ hf_oauth_expiration_minutes: 480
 
 # Nocturne Studio — Artist Locker
 
-Separate Hugging Face build of Nocturne Studio. Hugging Face sign-in is enabled, and the Artist Locker is restricted in the app to the owner account `ezwaypro`. The interface remains private while the sign-in gate is tested.
+Separate Hugging Face build of Nocturne Studio. Hugging Face sign-in is enabled, and the Artist Locker is restricted in the app to the owner account `ezwaypro`. The intended deployment setting is Protected: the source code stays private to the owner and collaborators, while the running app is reachable by URL. The app itself checks the signed-in Hugging Face username (`ezwaypro`) before showing the Artist Locker or accepting its actions.
 
 Artist entries are currently session-only and do not survive a restart. Durable private storage and database integration will be connected after secure storage credentials are configured. This Space does not connect to the production Nocturne database, EZway, Render, or Modal.
 
