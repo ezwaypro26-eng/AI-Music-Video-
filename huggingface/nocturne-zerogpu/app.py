@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import uuid
@@ -139,7 +140,7 @@ def add_artist(name, prompt, portrait, artists, profile: gr.OAuthProfile | None)
         }
         all_artists.append(entry)
         api.upload_file(
-            path_or_fileobj=json.dumps(all_artists, ensure_ascii=False, indent=2).encode("utf-8"),
+            path_or_fileobj=io.BytesIO(json.dumps(all_artists, ensure_ascii=False, indent=2).encode("utf-8")),
             path_in_repo=INDEX_PATH,
             repo_id=DATASET_REPO,
             repo_type="dataset",
