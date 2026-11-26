@@ -12,6 +12,9 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    env:
+      # Prisma validate/generate only need a syntactically valid URL; CI must never mutate a live database.
+      DATABASE_URL: "postgresql://ci:ci@127.0.0.1:5432/nocturne?schema=nocturne"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -20,6 +23,5 @@ jobs:
       - run: npm install
       - run: npx prisma validate
       - run: npx prisma generate
-      - run: npx prisma db push
       - run: npm run lint
       - run: npm run build
