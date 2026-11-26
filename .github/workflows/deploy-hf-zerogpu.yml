@@ -1,0 +1,32 @@
+name: Deploy Nocturne ZeroGPU Space
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Hugging Face upload client
+        run: python -m pip install --upgrade huggingface_hub
+
+      - name: Upload the private ZeroGPU Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "Missing GitHub Actions secret HF_TOKEN. Add a Hugging Face write token as a repository secret."
+            exit 1
+          fi
+          hf upload ezwaypro/nocturne-zerogpu huggingface/nocturne-zerogpu . --repo-type space --commit-message "Deploy Nocturne ZeroGPU starter"
