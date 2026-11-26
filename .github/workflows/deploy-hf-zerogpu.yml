@@ -35,3 +35,19 @@ jobs:
             exit 1
           fi
           hf upload ezwaypro/nocturne-zerogpu huggingface/nocturne-zerogpu . --repo-type space --commit-message "Deploy Nocturne ZeroGPU starter"
+
+      - name: Select included ZeroGPU hardware
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os
+          from huggingface_hub import HfApi
+
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          api.request_space_hardware(
+              repo_id="ezwaypro/nocturne-zerogpu",
+              hardware="zero-a10g",
+          )
+          print("Requested ZeroGPU hardware for ezwaypro/nocturne-zerogpu.")
+          PY
