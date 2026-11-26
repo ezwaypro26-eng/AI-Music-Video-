@@ -2,6 +2,11 @@ name: Deploy Nocturne ZeroGPU Space
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "huggingface/nocturne-zerogpu/**"
+      - ".github/workflows/deploy-hf-zerogpu.yml"
 
 permissions:
   contents: read
