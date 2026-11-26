@@ -24,28 +24,26 @@ def zero_gpu_ready():
 
 CSS = """
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
-:root { --nocturne-bg:#edf3fb; --nocturne-panel:#ffffff; --nocturne-line:#d7e2f0; --nocturne-blue:#2878f0; --nocturne-cyan:#20c9dc; --nocturne-ink:#14233c; }
-.gradio-container {max-width:1480px !important; background:linear-gradient(135deg,#f4f8ff 0%,#eaf2fc 48%,#f5f1ff 100%) !important; color:var(--nocturne-ink) !important; font-family:'DM Sans',sans-serif !important;}
-body {background:#edf3fb !important;}
-#hero {position:relative; overflow:hidden; padding:42px 44px; margin:12px 0 28px; border:1px solid #c9dcf4; border-radius:24px;
-background:radial-gradient(ellipse at 82% 15%,rgba(32,201,220,.30),transparent 32%),radial-gradient(ellipse at 65% 100%,rgba(119,91,255,.22),transparent 38%),linear-gradient(115deg,#ffffff 0%,#edf5ff 52%,#e9eaff 100%); box-shadow:0 18px 50px rgba(47,93,160,.10);}
-#hero:after {content:'N'; position:absolute; right:7%; top:-70px; font:800 280px/1 'Manrope',sans-serif; color:rgba(40,120,240,.07); pointer-events:none;}
-#hero .eyebrow {color:#2878f0; font-size:11px; letter-spacing:3px; font-weight:800; text-transform:uppercase; margin-bottom:13px;}
-#hero h1 {font:800 clamp(34px,5vw,58px)/1.05 'Manrope',sans-serif; letter-spacing:2px; background:linear-gradient(100deg,#172b50,#2878f0 58%,#16b9c9); -webkit-background-clip:text; background-clip:text; color:transparent; margin:0 0 12px;}
-#hero p {color:#536782; font-size:15px; max-width:650px; margin:0; line-height:1.75;}
-#hero .hero-foot {margin-top:22px; color:#2878f0; font-size:11px; letter-spacing:1.6px; font-weight:700; text-transform:uppercase;}
+:root { --nocturne-bg:#090a0d; --nocturne-panel:#12151b; --nocturne-line:#292d36; --nocturne-gold:#d6ad68; }
+.gradio-container {max-width:1440px !important; background:var(--nocturne-bg) !important; color:#f2f0eb !important; font-family:'DM Sans',sans-serif !important;}
+body, .gradio-container {background:var(--nocturne-bg) !important;}
+#hero {position:relative; overflow:hidden; padding:42px 44px; margin:12px 0 28px; border:1px solid #383027; border-radius:22px; background:radial-gradient(ellipse at 82% 15%,rgba(190,139,67,.20),transparent 36%),linear-gradient(115deg,#17191f 0%,#101116 58%,#211a12 100%);}
+#hero:after {content:'N'; position:absolute; right:7%; top:-65px; font:800 270px/1 'Manrope',sans-serif; color:rgba(214,173,104,.055); pointer-events:none;}
+#hero .eyebrow {color:#d6ad68; font-size:11px; letter-spacing:3px; font-weight:700; text-transform:uppercase; margin-bottom:13px;}
+#hero h1 {font:800 clamp(32px,5vw,54px)/1.05 'Manrope',sans-serif; letter-spacing:2px; color:#f4eee3; margin:0 0 12px;}
+#hero p {color:#b4b0a8; font-size:15px; max-width:620px; margin:0; line-height:1.7;}
+#hero .hero-foot {margin-top:22px; color:#d6ad68; font-size:11px; letter-spacing:1.6px; text-transform:uppercase;}
 .section-head {border-bottom:1px solid var(--nocturne-line); padding:4px 0 14px; margin-bottom:18px;}
-.section-head h2 {font:800 21px 'Manrope',sans-serif; color:#172b50; margin:0 0 5px;}
-.section-head p {color:#667b96; font-size:13px; margin:0;}
-.panel {background:rgba(255,255,255,.88); border:1px solid #d5e2f2; border-radius:20px; padding:22px !important; box-shadow:0 12px 34px rgba(44,83,135,.08);}
-.gradio-container label, .gradio-container .prose, .gradio-container h3 {color:#243a59 !important;}
-.gradio-container input, .gradio-container textarea {background:#f8fbff !important; color:#172b50 !important; border:1px solid #cbd9ec !important; border-radius:11px !important;}
-.gradio-container input::placeholder, .gradio-container textarea::placeholder {color:#8a9bb2 !important;}
-.gradio-container button.primary {background:linear-gradient(105deg,#2878f0,#20bfd2) !important; color:#fff !important; border:0 !important; font-weight:800 !important; box-shadow:0 8px 20px rgba(40,120,240,.22) !important;}
-.gradio-container button {border-radius:11px !important; border-color:#cbd9ec !important;}
-.gradio-container .gallery {border-color:#d5e2f2 !important; border-radius:14px !important;}
-.gradio-container .wrap {border-radius:14px;}
-@media (max-width:700px) {#hero {padding:28px 22px;} #hero:after {right:-5%; font-size:190px;} .panel {padding:15px !important;}}
+.section-head h2 {font:700 20px 'Manrope',sans-serif; color:#f3eee5; margin:0 0 5px;}
+.section-head p {color:#9699a2; font-size:13px; margin:0;}
+.panel {background:linear-gradient(145deg,#151820,#101218); border:1px solid var(--nocturne-line); border-radius:18px; padding:22px !important;}
+.gradio-container label, .gradio-container .prose {color:#d8d6d0 !important;}
+.gradio-container input, .gradio-container textarea {background:#0d1015 !important; border-color:#303540 !important; border-radius:10px !important;}
+.gradio-container button.primary {background:linear-gradient(120deg,#d7b36f,#a77a3e) !important; color:#17130d !important; border:0 !important; font-weight:700 !important;}
+.gradio-container button {border-radius:10px !important;}
+.gradio-container .gallery {border-color:#303540 !important;}
+.muted {color:#aaa;}
+@media (max-width: 700px) { #hero {padding:28px 22px;} #hero:after {right:-5%; font-size:190px;} }
 """
 
 
@@ -184,7 +182,7 @@ def refresh_artists(artists, profile: gr.OAuthProfile | None):
 
 with gr.Blocks(
     title="Nocturne Studio",
-    theme=gr.themes.Base(primary_hue="blue", secondary_hue="cyan", neutral_hue="slate"),
+    theme=gr.themes.Base(primary_hue="amber", secondary_hue="stone", neutral_hue="slate"),
 ) as demo:
     gr.HTML("""
       <div id="hero">
