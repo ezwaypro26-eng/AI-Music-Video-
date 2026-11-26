@@ -8,15 +8,15 @@ sdk_version: "6.32.0"
 app_file: app.py
 python_version: "3.12"
 startup_duration_timeout: 30m
-short_description: Owner-authenticated Nocturne Artist Locker preview
+short_description: Owner-authenticated Nocturne Artist Locker
 hf_oauth: true
 hf_oauth_expiration_minutes: 480
 ---
 
 # Nocturne Studio — Artist Locker
 
-Separate Hugging Face build of Nocturne Studio. Hugging Face sign-in is enabled, and the Artist Locker is restricted in the app to the owner account `ezwaypro`. The intended deployment setting is Protected: the source code stays private to the owner and collaborators, while the running app is reachable by URL. The app itself checks the signed-in Hugging Face username (`ezwaypro`) before showing the Artist Locker or accepting its actions.
+Separate Hugging Face build of Nocturne Studio. Hugging Face sign-in is enabled, and the Artist Locker is restricted in the app to the owner account `ezwaypro`.
 
-Artist entries are currently session-only and do not survive a restart. Durable private storage and database integration will be connected after secure storage credentials are configured. This Space does not connect to the production Nocturne database, EZway, Render, or Modal.
+Artist names, visual notes, and reference portraits are saved to the separate private dataset `ezwaypro/nocturne-artist-locker`. The Space requires an `HF_TOKEN` secret with write access to that private dataset. Add the token under Space Settings → Variables and secrets → New secret (name: `HF_TOKEN`). Never paste the token into chat or commit it to GitHub.
 
-The Artist Locker does not request GPU time. The ZeroGPU diagnostic function is registered for later model work but is not called by the Artist Locker.
+This Space does not connect to production Nocturne, EZway, Supabase, Render, or Modal. Artist Locker actions do not request GPU time; ZeroGPU is reserved for future model features.
