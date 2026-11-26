@@ -764,7 +764,7 @@ app.get("/api/ezway/tracks/:id/audio", async (req: Request, res: Response) => {
 // One-time safety export: copy the current SQLite database and all public media to private Supabase Storage.
 app.get("/api/admin/backup-to-supabase", async (_req: Request, res: Response) => {
   try {
-    await prisma.$executeRawUnsafe("PRAGMA wal_checkpoint(FULL);");
+    await prisma.$queryRawUnsafe("PRAGMA wal_checkpoint(FULL);");
     const dbList = await prisma.$queryRawUnsafe("PRAGMA database_list") as Array<{ file?: string }>;
     const dbPath = dbList.find((entry) => entry.file)?.file;
     if (!dbPath || !fs.existsSync(dbPath)) throw new Error("Could not locate the active SQLite database file.");
