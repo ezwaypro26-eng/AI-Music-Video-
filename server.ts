@@ -237,6 +237,51 @@ function deletePublicAsset(publicRelPath: string | null | undefined) {
   }
 }
 
+const NOCTURNE_SUPABASE_URL = (process.env.SUPABASE_URL || "https://cdvfxkefhcqmifnddvza.supabase.co").replace(/\/+$/, "");
+const NOCTURNE_MEDIA_BUCKET = "nocturne-media";
+
+function getSupabaseStorageHeaders(contentType: string) {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  if (!key) throw new Error("SUPABASE_SERVICE_ROLE_KEY is not configured on Render.");
+  return {
+    apikey: key,
+    authorization: `Bearer ${key}`,
+    "content-type": contentType,
+    "x-upsert": "true",
+  };
+}
+
+async function uploadNocturneObject(objectPath: string, bytes: Buffer, contentType: string): Promise<void> {
+  const encodedPath = objectPath.split("/").map(encodeURIComponent).join("/");
+  const response = await fetch(`${NOCTURNE_SUPABASE_URL}/storage/v1/object/${NOCTURNE_MEDIA_BUCKET}/${encodedPath}`, {
+    method: "POST",
+    headers: getSupabaseStorageHeaders(contentType),
+    body: new Uint8Array(bytes),
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Supabase media backup failed for ${objectPath} (${response.status}): ${detail.slice(0, 500)}`);
+  }
+}
+
+function getAssetContentType(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  return ({
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp",
+    ".mp3": "audio/mpeg", ".wav": "audio/wav", ".m4a": "audio/mp4", ".aac": "audio/aac",
+    ".ogg": "audio/ogg", ".flac": "audio/flac", ".mp4": "video/mp4", ".mov": "video/quicktime",
+    ".json": "application/json", ".txt": "text/plain", ".vtt": "text/vtt", ".srt": "application/x-subrip",
+  } as Record<string, string>)[ext] || "application/octet-stream";
+}
+
+function listFilesRecursive(dir: string): string[] {
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(dir, entry.name);
+    return entry.isDirectory() ? listFilesRecursive(full) : entry.isFile() ? [full] : [];
+  });
+}
+
 async function downloadImageToPublic(imageUrl: string, destDir: string, prefix: string): Promise<string> {
   const response = await fetch(imageUrl);
   if (!response.ok) {
@@ -714,6 +759,63 @@ app.get("/api/ezway/tracks/:id/audio", async (req: Request, res: Response) => {
   } catch (err) {
     console.error("GET /api/ezway/tracks/:id/audio failed:", err);
     res.status(502).json({ error: err instanceof Error ? err.message : "Could not download the selected EZway audio." });
+  }
+});
+
+// One-time safety export: copy the current SQLite database and all public media to private Supabase Storage.
+app.get("/api/admin/backup-to-supabase", async (_req: Request, res: Response) => {
+  try {
+    await prisma.$executeRawUnsafe("PRAGMA wal_checkpoint(FULL);");
+    const dbList = await prisma.$queryRawUnsafe("PRAGMA database_list") as Array<{ file?: string }>;
+    const dbPath = dbList.find((entry) => entry.file)?.file;
+    if (!dbPath || !fs.existsSync(dbPath)) throw new Error("Could not locate the active SQLite database file.");
+    const dbBytes = fs.readFileSync(dbPath);
+    if (dbBytes.length < 100) throw new Error("The SQLite database backup appears to be empty.");
+
+    const counts = {
+      artists: await prisma.character.count(),
+      projects: await prisma.project.count(),
+      scenes: await prisma.scene.count(),
+      projectCast: await prisma.projectCast.count(),
+    };
+    await uploadNocturneObject("migration-backup/nocturne.sqlite", dbBytes, "application/vnd.sqlite3");
+
+    const files = listFilesRecursive(PUBLIC_DIR);
+    let uploadedFiles = 0;
+    let uploadedBytes = 0;
+    const failures: Array<{ file: string; error: string }> = [];
+    for (const fullPath of files) {
+      const relative = path.relative(PUBLIC_DIR, fullPath).split(path.sep).join("/");
+      try {
+        const bytes = fs.readFileSync(fullPath);
+        if (bytes.length > 104857600) {
+          failures.push({ file: relative, error: "File exceeds the current 100 MB bucket limit." });
+          continue;
+        }
+        await uploadNocturneObject(`migration-backup/public/${relative}`, bytes, getAssetContentType(fullPath));
+        uploadedFiles += 1;
+        uploadedBytes += bytes.length;
+      } catch (fileErr) {
+        failures.push({ file: relative, error: fileErr instanceof Error ? fileErr.message : "Upload failed." });
+      }
+    }
+
+    const manifest = {
+      createdAt: new Date().toISOString(),
+      databaseFile: path.basename(dbPath),
+      databaseBytes: dbBytes.length,
+      counts,
+      uploadedFiles,
+      uploadedBytes,
+      failures,
+    };
+    await uploadNocturneObject("migration-backup/manifest.json", Buffer.from(JSON.stringify(manifest, null, 2)), "application/json");
+    res.json({ ok: failures.length === 0, ...manifest, message: failures.length === 0
+      ? "SQLite database and public media backup completed."
+      : "Backup completed with some media files requiring attention. Do not switch databases yet." });
+  } catch (err) {
+    console.error("GET /api/admin/backup-to-supabase failed:", err);
+    res.status(500).json({ error: err instanceof Error ? err.message : "Nocturne backup failed." });
   }
 });
 
