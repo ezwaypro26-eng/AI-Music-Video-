@@ -1,10 +1,12 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = "file:./dev.db"
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["nocturne"]
 }
 
 model Character {
@@ -16,6 +18,8 @@ model Character {
   updatedAt    DateTime  @updatedAt
   projects     Project[]
   castEntries  ProjectCast[]
+
+  @@schema("nocturne")
 }
 
 model Project {
@@ -36,6 +40,8 @@ model Project {
   updatedAt      DateTime   @updatedAt
   scenes         Scene[]
   castMembers    ProjectCast[]
+
+  @@schema("nocturne")
 }
 
 model Scene {
@@ -55,6 +61,8 @@ model Scene {
   status       String   @default("pending")
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  @@schema("nocturne")
 }
 
 model ProjectCast {
@@ -72,4 +80,6 @@ model ProjectCast {
   @@unique([projectId, artistId])
   @@unique([projectId, sortOrder])
   @@index([artistId])
+
+  @@schema("nocturne")
 }
