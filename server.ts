@@ -2713,7 +2713,13 @@ async function ensureSqliteSchema() {
 
 // ---------- Vite Dev Middleware or Static Prod Serving ----------
 async function startServer() {
-  await ensureSqliteSchema();
+  if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required. Configure the Nocturne Supabase PostgreSQL connection in Render.");
+  await prisma.$connect();
+  const databaseContext = await prisma.$queryRaw<Array<{ schema: string }>>`SELECT current_schema() AS schema`;
+  if (databaseContext[0]?.schema !== "nocturne") {
+    throw new Error(`Nocturne database connection resolved to schema ${databaseContext[0]?.schema || "unknown"}, not nocturne. Refusing to start.`);
+  }
+  console.log("Nocturne connected to its isolated Supabase PostgreSQL schema.");
 
   const httpServer = http.createServer(app);
 
