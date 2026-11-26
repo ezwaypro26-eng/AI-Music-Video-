@@ -89,7 +89,7 @@ def gallery_cards(artists, token):
             f"{artist.get('visual_prompt') or 'No visual notes yet.'}\n\n"
             f"Added {artist.get('created', 'date unavailable')}"
         )
-        cards.append([image_path, description])
+        cards.append((image_path, description))
     return cards
 
 
