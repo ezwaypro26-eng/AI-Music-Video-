@@ -457,9 +457,24 @@ async function generateImageWithModalFlux(params: {
   const { width, height } = getDimensionsForAspectRatio(params.aspectRatio);
   let referenceImageBase64: string | undefined;
   if (params.referenceImagePath) {
-    const fullPath = path.join(PUBLIC_DIR, params.referenceImagePath.replace(/^\/+/, ""));
-    if (!fs.existsSync(fullPath)) throw new Error("The artist reference portrait could not be found.");
-    referenceImageBase64 = fs.readFileSync(fullPath).toString("base64");
+    const referencePath = params.referenceImagePath.replace(/^\/+/, "");
+    if (referencePath.startsWith("characters/")) {
+      // Artist Locker portraits live in the private Supabase Storage bucket.
+      const signedUrl = await createNocturneSignedUrl(referencePath, 300);
+      const imageResponse = await fetch(signedUrl);
+      if (!imageResponse.ok) {
+        const detail = await imageResponse.text();
+        throw new Error(\`Could not download artist reference portrait from Supabase (\${imageResponse.status}): \${detail.slice(0, 300)}\`);
+      }
+      const imageBytes = Buffer.from(await imageResponse.arrayBuffer());
+      if (imageBytes.length < 100) throw new Error("Supabase returned an empty artist reference portrait.");
+      referenceImageBase64 = imageBytes.toString("base64");
+    } else {
+      // Keep compatibility with older portraits stored on the local public folder.
+      const fullPath = path.join(PUBLIC_DIR, referencePath);
+      if (!fs.existsSync(fullPath)) throw new Error("The artist reference portrait could not be found in Supabase Storage or local media.");
+      referenceImageBase64 = fs.readFileSync(fullPath).toString("base64");
+    }
   }
 
   const submittedResponse = await fetch(`${config.url}/submit`, {
